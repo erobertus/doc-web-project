@@ -50,19 +50,20 @@ def update_reference(status: str, statuses: dict,
         curs.execute(f'INSERT INTO {table} '
                      f'({name_col})'
                      'VALUES (?)', (status,))
-        result = curs.lastrowid
+        res = curs.lastrowid
 
-        statuses[status] = result
+        statuses[status] = res
 
     else:
+        # cool
         curs.execute(f'SELECT {code_col} as code_col '
                      f'FROM {table} WHERE {name_col} = ?', (status,))
-        for (result,) in curs:
+        for (res,) in curs:
             pass
     in_db.commit()
     in_db.autocommit = save_commit_state
 
-    return result
+    return res
 
 
 def retrieve_code_from_name(member: str, array: dict,
