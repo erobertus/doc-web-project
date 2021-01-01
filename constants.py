@@ -47,6 +47,7 @@ WEB_DATE_OF_DEATH = 'Date of Death:'
 C_DATE_OF_DEATH = 'date_of_death'
 WEB_REG_IN_OTHER_JUR = 'Medical Licences in Other Jurisdictions'
 MD_REG_JURISDIC = WEB_REG_IN_OTHER_JUR
+MD_ADDRESSES = 'Practice Addresses'
 REG_JUR_TABLE = 'z847e_MD_reg_jurisdiction'
 C_JUR_CODE = 'jur_code'
 C_JUR_NAME = 'jur_name'
@@ -59,12 +60,22 @@ C_ADDR_COUNTRY = 'country'
 C_ADDR_DISTRICT = 'district_no'
 C_ADDR_ORDER = 'order_no'
 C_ADDR_PHONE_NO = 'phone_no'
+C_ADDR_EXT = 'ext_no'
 C_ADDR_FAX_NO = 'fax_no'
+C_ADDR_COUNTY = 'county'
+
 
 POSTAL_SEPARATOR = '\xa0'
 PHONE_TAG = 'Phone:'
 FAX_TAG = 'Fax:'
-E_DISTR_TAG = 'Electoral district:'
+COUNTY_TAG = 'County:'
+E_DISTR_TAG = 'Electoral District:'
+
+CANADA = 'Canada'
 
 WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
-              E_DISTR_TAG: C_ADDR_DISTRICT}
+              E_DISTR_TAG: C_ADDR_DISTRICT, COUNTY_TAG: C_ADDR_COUNTY,
+              WEB_DATE_OF_DEATH: C_DATE_OF_DEATH,
+              WEB_GENDER: C_MD_GENDER}
+
+TEST_CPSO = 82834

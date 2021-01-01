@@ -43,7 +43,6 @@ def update_reference(status: str, statuses: dict,
         statuses[status] = result
 
     else:
-        # test comment here
         curs.execute(f'SELECT {code_col} as code_col '
                      f'FROM {table} WHERE {name_col} = ?', (status,))
         for (result,) in curs:
@@ -68,12 +67,29 @@ def retrieve_code_from_name(member: str, array: dict,
 def is_numeric(s: str) -> bool:
     return re.sub('\W|_', '', s).isnumeric()
 
+def is_at_top_of_address(addr: list, position: int) -> bool:
+    result = False
+    if (position == 0) or (position >= len(addr)):
+        result = True
+    elif addr[position] in (PHONE_TAG, FAX_TAG, COUNTY_TAG,
+                            E_DISTR_TAG):
+        result = False
+    elif addr[position-1] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG) \
+            and not is_numeric(addr[position]):
+        result = True
+    elif addr[position-2] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG) \
+            and is_numeric(addr[position-1]):
+        result = True
 
-def processs_address(source: 'bs4.element.ResultSet') -> dict:
+    return result
+
+
+def processs_address(source: 'bs4.element.ResultSet') -> list[dict]:
 
     addr_dict = {}
-    addr_list = []
+    return_list = []
     i = 0
+    addr_order = 0
 
     while i < len(source):
         addr_list = [s for s in source[i].stripped_strings]
@@ -81,30 +97,46 @@ def processs_address(source: 'bs4.element.ResultSet') -> dict:
         j = 0
         at_top_of_addr = True
 
+
         while j < len(addr_list):
             if at_top_of_addr:
                 # init vars
                 streets = []
                 addr_line = 1
+                addr_order += 1
                 streets_filled = False
 
             if addr_list[j].find(POSTAL_SEPARATOR) > -1:
                 # we are on the line with city, province, postal
                 cur_info = addr_list[j].split(POSTAL_SEPARATOR)
                 addr_dict[C_ADDR_CITY] = cur_info[0]
-                addr_dict[C_ADDR_PROV] = cur_info[1]
-                addr_dict[C_ADDR_POSTAL] = cur_info[3]
+                if len(cur_info) > 2:
+                    addr_dict[C_ADDR_PROV] = cur_info[1]
+                    addr_dict[C_ADDR_POSTAL] = cur_info[3]
+                else:
+#                    addr_dict[C_ADDR_PROV] = ''
+                    addr_dict[C_ADDR_POSTAL] = cur_info[1]
 
-                # we are on the line with postal code, so the
-                # next one is country - increase j and fill country
-                j += 1
-                addr_dict[C_ADDR_COUNTRY] = addr_list[j]
+                if j+1 < len(addr_list):
+                    if addr_list[j+1] in (PHONE_TAG, FAX_TAG,
+                                          E_DISTR_TAG, COUNTY_TAG):
+                        addr_dict[C_ADDR_COUNTRY] = CANADA
+                    else:
+                        j += 1
+                        addr_dict[C_ADDR_COUNTRY] = addr_list[j]
                 streets_filled = True
             elif addr_list[j] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG):
-                if is_numeric(addr_list[j+1]):
-                    addr_dict[WEB2DB_MAP[addr_list[j]]] = \
-                        addr_list[j+1]
+                cur_info = addr_list[j+1].split(POSTAL_SEPARATOR)
+
+                if is_numeric(cur_info[0]):
+                    addr_dict[WEB2DB_MAP[addr_list[j]]] = cur_info[0]
+                    if addr_list[j] == PHONE_TAG and len(cur_info) > 1:
+                        addr_dict[C_ADDR_EXT] = cur_info[2]
                     j += 1
+            elif addr_list[j] == COUNTY_TAG and \
+                addr_list[j+1] != E_DISTR_TAG:
+                addr_dict[WEB2DB_MAP[COUNTY_TAG]] = addr_list[j+1]
+                j += 1
 
             if not streets_filled:
                 addr_dict[C_ADDR_PREFIX+str(addr_line)] = addr_list[j]
@@ -112,10 +144,15 @@ def processs_address(source: 'bs4.element.ResultSet') -> dict:
                 at_top_of_addr = False
 
             j += 1
+            if is_at_top_of_address(addr_list, j):
+                if len(addr_dict) > 0:
+                    return_list.append(addr_dict)
+                    addr_dict = {}
+                    at_top_of_addr = True
 
         i += 1
 
-    return addr_dict
+    return return_list
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
@@ -151,7 +188,6 @@ if __name__ == '__main__':
 
     db_reg_jurisdic = refresh_ref_from_db(conn, REG_JUR_TABLE,
                                           C_JUR_CODE, C_JUR_NAME)
-    # test = update_reference('test status', db_statuses, conn)
 
     browser = ms.StatefulBrowser()
     url = 'https://doctors.cpso.on.ca/?search=general'
@@ -159,7 +195,7 @@ if __name__ == '__main__':
     # page_html = page.soup
     # form = browser.select_form('form[action="/?search=general"]')
     form = browser.select_form()
-    cur_CPSO =  60387
+    cur_CPSO = TEST_CPSO
     form[ALL_DR_SEARCH_CHECKMARK] = True
     form[CPSONO_FIELD] = cur_CPSO
     response = browser.submit_selected()
@@ -167,8 +203,9 @@ if __name__ == '__main__':
     page = response.soup
     name = re.sub('(\r\n|\t|\s)',' ', page.h1.string).strip()
     names = name.split()
-    name_dict = {C_LNAME: names[0].strip(','), C_FNAME: names[1],
-                 C_MNAME: ' '.join(names[2:])}
+    record[C_LNAME] = names[0].strip(',')
+    record[C_FNAME] = names[1]
+    record[C_MNAME] = ' '.join(names[2:])
 
     all_info = page.find_all('div', class_=CL_DR_INFO)
 
@@ -203,9 +240,11 @@ if __name__ == '__main__':
                 record[C_FRMR_NAME] = info[i+1]
                 i += 1
             elif info[i] == WEB_GENDER:
-                record[C_MD_GENDER] = retrieve_code_from_name(
-                    info[i+1], db_genders, conn, GENDER_TABLE,
-                    C_GENDER_CODE, C_GENDER_NAME)
+                record[WEB2DB_MAP[WEB_GENDER]] = \
+                    retrieve_code_from_name(
+                        info[i+1], db_genders, conn,
+                        GENDER_TABLE, C_GENDER_CODE, C_GENDER_NAME
+                    )
                 i += 1
             elif info[i] == WEB_LANGUAGES:
                 md_languages = re.sub(', +', DELIM_COMMA,
@@ -213,9 +252,10 @@ if __name__ == '__main__':
                 lang_codes = []
                 for language in md_languages:
                     lang_codes.append(
-                        retrieve_code_from_name(language, db_languages,
-                                            conn, LANGUAGE_TABLE,
-                                            C_LANG_CODE, C_LANG_NAME)
+                        retrieve_code_from_name(
+                            language, db_languages, conn,
+                            LANGUAGE_TABLE, C_LANG_CODE, C_LANG_NAME
+                        )
                     )
                 record[MD_LANGUAGES] = lang_codes
                 i += 1
@@ -229,7 +269,7 @@ if __name__ == '__main__':
                 record[C_GRAD_YEAR] = education[1]
                 i += 1
             elif info[i] == WEB_DATE_OF_DEATH:
-                record[C_DATE_OF_DEATH] = info[i+1]
+                record[WEB2DB_MAP[WEB_DATE_OF_DEATH]] = info[i+1]
                 i += 1
             elif info[i] == WEB_REG_IN_OTHER_JUR:
 
@@ -244,6 +284,7 @@ if __name__ == '__main__':
             i += 1
 
     all_info = page.find_all('div', class_=CL_ADD_PR_LOC)
-    processs_address(all_info)
+    record[MD_ADDRESSES] = processs_address(all_info)
+    print(record)
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
