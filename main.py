@@ -65,6 +65,10 @@ def retrieve_code_from_name(member: str, array: dict,
 
     return result
 
+def is_numeric(s: str) -> bool:
+    return re.sub('\W|_', '', s).isnumeric()
+
+
 def processs_address(source: 'bs4.element.ResultSet') -> dict:
 
     addr_dict = {}
@@ -97,14 +101,15 @@ def processs_address(source: 'bs4.element.ResultSet') -> dict:
                 addr_dict[C_ADDR_COUNTRY] = addr_list[j]
                 streets_filled = True
             elif addr_list[j] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG):
+                if is_numeric(addr_list[j+1]):
+                    addr_dict[WEB2DB_MAP[addr_list[j]]] = \
+                        addr_list[j+1]
+                    j += 1
 
             if not streets_filled:
                 addr_dict[C_ADDR_PREFIX+str(addr_line)] = addr_list[j]
                 addr_line += 1
                 at_top_of_addr = False
-
-
-
 
             j += 1
 
