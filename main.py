@@ -346,6 +346,7 @@ if __name__ == '__main__':
         hosp_list.append(hosp_dict)
         i += 2
     record[MD_HOSPITALS] = hosp_list
+
     print(record)
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
