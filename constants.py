@@ -58,6 +58,13 @@ C_ADDR_POSTAL = 'postal_code'
 C_ADDR_COUNTRY = 'country'
 C_ADDR_DISTRICT = 'district_no'
 C_ADDR_ORDER = 'order_no'
-POSTAL_SEPARATOR = '\xa0'
+C_ADDR_PHONE_NO = 'phone_no'
+C_ADDR_FAX_NO = 'fax_no'
 
-WEB2DB_MAP = {WEB_FRMR_NAME: 'former_name'}
+POSTAL_SEPARATOR = '\xa0'
+PHONE_TAG = 'Phone:'
+FAX_TAG = 'Fax:'
+E_DISTR_TAG = 'Electoral district:'
+
+WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
+              E_DISTR_TAG: C_ADDR_DISTRICT}

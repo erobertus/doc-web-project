@@ -82,6 +82,7 @@ def processs_address(source: 'bs4.element.ResultSet') -> dict:
                 # init vars
                 streets = []
                 addr_line = 1
+                streets_filled = False
 
             if addr_list[j].find(POSTAL_SEPARATOR) > -1:
                 # we are on the line with city, province, postal
@@ -90,7 +91,20 @@ def processs_address(source: 'bs4.element.ResultSet') -> dict:
                 addr_dict[C_ADDR_PROV] = cur_info[1]
                 addr_dict[C_ADDR_POSTAL] = cur_info[3]
 
-            print(j, addr_element)
+                # we are on the line with postal code, so the
+                # next one is country - increase j and fill country
+                j += 1
+                addr_dict[C_ADDR_COUNTRY] = addr_list[j]
+                streets_filled = True
+            elif addr_list[j] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG):
+
+            if not streets_filled:
+                addr_dict[C_ADDR_PREFIX+str(addr_line)] = addr_list[j]
+                addr_line += 1
+                at_top_of_addr = False
+
+
+
 
             j += 1
 
