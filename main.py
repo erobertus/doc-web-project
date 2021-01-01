@@ -1,9 +1,6 @@
 # This is a sample Python script.
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
-import urllib.request
 import sys
 import mechanicalsoup as ms
 import re
@@ -13,8 +10,8 @@ from constants import *
 # NnBgmX$t^+tG
 
 
-def refresh_ref_from_db(in_db: 'mariadb.connection', table: str,
-                         code_col:str, name_col: str) -> dict:
+def refresh_ref_from_db(in_db: 'connection', table: str,
+                        code_col: str, name_col: str) -> dict:
     curs = in_db.cursor()
     curs.execute(f'SELECT {name_col}, {code_col} '
                  f'FROM {table}')
@@ -22,6 +19,7 @@ def refresh_ref_from_db(in_db: 'mariadb.connection', table: str,
     for (reg_stat_name, reg_stat_code) in curs:
         statuses[reg_stat_name] = reg_stat_code
     return statuses
+
 
 def update_reference(status: str, statuses: dict,
                      in_db: 'connection',
@@ -52,20 +50,23 @@ def update_reference(status: str, statuses: dict,
 
     return result
 
+
 def retrieve_code_from_name(member: str, array: dict,
-                            conn: 'connection',
+                            cur_conn: 'connection',
                             table: str, code_col: str,
                             name_col: str) -> int:
     if member not in array:
         result = update_reference(
-            member, array, conn, table, code_col, name_col)
+            member, array, cur_conn, table, code_col, name_col)
     else:
         result = array[member]
 
     return result
 
+
 def is_numeric(s: str) -> bool:
-    return re.sub('\W|_', '', s).isnumeric()
+    return re.sub(r'\W|_', '', s).isnumeric()
+
 
 def is_at_top_of_address(addr: list, position: int) -> bool:
     result = False
@@ -84,38 +85,34 @@ def is_at_top_of_address(addr: list, position: int) -> bool:
     return result
 
 
-def processs_address(source: 'bs4.element.ResultSet') -> list[dict]:
+def processs_address(source: 'ResultSet') -> list[dict]:
 
     addr_dict = {}
     return_list = []
-    i = 0
+    idx = 0
     addr_order = 0
 
-    while i < len(source):
-        addr_list = [s for s in source[i].stripped_strings]
+    while idx < len(source):
+        addr_list = [s for s in source[idx].stripped_strings]
 
         j = 0
         at_top_of_addr = True
 
-
         while j < len(addr_list):
             if at_top_of_addr:
-                # init vars
-                streets = []
                 addr_line = 1
                 addr_order += 1
                 streets_filled = False
 
             if addr_list[j].find(POSTAL_SEPARATOR) > -1:
                 # we are on the line with city, province, postal
-                cur_info = addr_list[j].split(POSTAL_SEPARATOR)
-                addr_dict[C_ADDR_CITY] = cur_info[0]
-                if len(cur_info) > 2:
-                    addr_dict[C_ADDR_PROV] = cur_info[1]
-                    addr_dict[C_ADDR_POSTAL] = cur_info[3]
+                t_info = addr_list[j].split(POSTAL_SEPARATOR)
+                addr_dict[C_ADDR_CITY] = t_info[0]
+                if len(t_info) > 2:
+                    addr_dict[C_ADDR_PROV] = t_info[1]
+                    addr_dict[C_ADDR_POSTAL] = t_info[3]
                 else:
-#                    addr_dict[C_ADDR_PROV] = ''
-                    addr_dict[C_ADDR_POSTAL] = cur_info[1]
+                    addr_dict[C_ADDR_POSTAL] = t_info[1]
 
                 if j+1 < len(addr_list):
                     if addr_list[j+1] in (PHONE_TAG, FAX_TAG,
@@ -126,15 +123,16 @@ def processs_address(source: 'bs4.element.ResultSet') -> list[dict]:
                         addr_dict[C_ADDR_COUNTRY] = addr_list[j]
                 streets_filled = True
             elif addr_list[j] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG):
-                cur_info = addr_list[j+1].split(POSTAL_SEPARATOR)
+                t_info = addr_list[j+1].split(POSTAL_SEPARATOR)
 
-                if is_numeric(cur_info[0]):
-                    addr_dict[WEB2DB_MAP[addr_list[j]]] = cur_info[0]
-                    if addr_list[j] == PHONE_TAG and len(cur_info) > 1:
-                        addr_dict[C_ADDR_EXT] = cur_info[2]
+                if is_numeric(t_info[0]):
+                    addr_dict[WEB2DB_MAP[addr_list[j]]] = t_info[0]
+                    if addr_list[j] == PHONE_TAG and \
+                            len(t_info) > 1:
+                        addr_dict[C_ADDR_EXT] = t_info[2]
                     j += 1
             elif addr_list[j] == COUNTY_TAG and \
-                addr_list[j+1] != E_DISTR_TAG:
+                    addr_list[j+1] != E_DISTR_TAG:
                 addr_dict[WEB2DB_MAP[COUNTY_TAG]] = addr_list[j+1]
                 j += 1
 
@@ -150,9 +148,10 @@ def processs_address(source: 'bs4.element.ResultSet') -> list[dict]:
                     addr_dict = {}
                     at_top_of_addr = True
 
-        i += 1
+        idx += 1
 
     return return_list
+
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
@@ -181,13 +180,22 @@ if __name__ == '__main__':
                                      C_GENDER_CODE, C_GENDER_NAME)
 
     db_languages = refresh_ref_from_db(conn, LANGUAGE_TABLE,
-                                     C_LANG_CODE, C_LANG_NAME)
+                                       C_LANG_CODE, C_LANG_NAME)
 
     db_universities = refresh_ref_from_db(conn, UNIV_TABLE,
                                           C_UNIV_CODE, C_UNIV_NAME)
 
     db_reg_jurisdic = refresh_ref_from_db(conn, REG_JUR_TABLE,
                                           C_JUR_CODE, C_JUR_NAME)
+
+    db_specialties = refresh_ref_from_db(conn, SPEC_TABLE,
+                                         C_SPEC_CODE, C_SPEC_NAME)
+
+    db_spec_types = refresh_ref_from_db(conn, STYPE_TABLE,
+                                        C_STYPE_CODE, C_STYPE_NAME)
+
+    db_hospitals = refresh_ref_from_db(conn, HOSP_TABLE,
+                                       C_HOSP_CODE, C_HOSP_NAME)
 
     browser = ms.StatefulBrowser()
     url = 'https://doctors.cpso.on.ca/?search=general'
@@ -201,16 +209,16 @@ if __name__ == '__main__':
     response = browser.submit_selected()
     record = {C_CPSO_NO: cur_CPSO}
     page = response.soup
-    name = re.sub('(\r\n|\t|\s)',' ', page.h1.string).strip()
+    name = re.sub(r'(\r\n|\t|\s)', ' ', page.h1.string).strip()
     names = name.split()
     record[C_LNAME] = names[0].strip(',')
     record[C_FNAME] = names[1]
     record[C_MNAME] = ' '.join(names[2:])
 
-    all_info = page.find_all('div', class_=CL_DR_INFO)
+    all_info = page.find_all(DIV, class_=CL_DR_INFO)
 
     for cur_info in all_info:
-        info = [re.sub('[\r\n\t\s]+as of[\r\n\t\s]*', ' as of ', s)
+        info = [re.sub(r'[\r\n\t\s]+as of[\r\n\t\s]*', ' as of ', s)
                 for s in cur_info.stripped_strings]
         info[1] = info[1].split(' as of ')
 
@@ -230,7 +238,7 @@ if __name__ == '__main__':
 
         # print(info)
 
-    all_info = page.find_all('div', class_=CL_INFO)
+    all_info = page.find_all(DIV, class_=CL_INFO)
 
     for cur_info in all_info:
         info = [s for s in cur_info.stripped_strings]
@@ -261,7 +269,7 @@ if __name__ == '__main__':
                 i += 1
             elif info[i] == WEB_UNIVERSITY:
                 education = re.sub(', +', DELIM_COMMA,
-                                  info[i+1]).split(DELIM_COMMA)
+                                   info[i+1]).split(DELIM_COMMA)
                 record[C_UNIV_CODE] = retrieve_code_from_name(
                     education[0], db_universities,
                     conn, UNIV_TABLE, C_UNIV_CODE, C_UNIV_NAME
@@ -283,8 +291,61 @@ if __name__ == '__main__':
                 i += len(info[i+1:])
             i += 1
 
-    all_info = page.find_all('div', class_=CL_ADD_PR_LOC)
+    all_info = page.find_all(DIV, class_=CL_ADD_PR_LOC)
     record[MD_ADDRESSES] = processs_address(all_info)
+
+    all_info = page.find_all(SECT,
+                             class_=CL_SPECIALTIES,
+                             id=ID_SPECIALTIES)
+
+    if len(all_info) > 0:
+        cur_info = [s for s in all_info[0].stripped_strings][4:]
+    else:
+        cur_info = []
+
+    i = 0
+    spec_list = []
+
+    while i < len(cur_info):
+        spec_dict = {C_SPEC_CODE:
+                         retrieve_code_from_name(
+                             cur_info[i], db_specialties, conn,
+                             SPEC_TABLE, C_SPEC_CODE, C_SPEC_NAME
+                         )}
+        if i+1 < len(cur_info):
+            spec_dict[C_SPEC_DATE] = cur_info[i+1].split(':')[1]
+            spec_dict[C_STYPE_CODE] = retrieve_code_from_name(
+                cur_info[i+2], db_spec_types, conn,
+                STYPE_TABLE, C_STYPE_CODE, C_STYPE_NAME
+            )
+
+        spec_list.append(spec_dict)
+        i += 3
+
+    record[MD_SPECIALTIES] = spec_list
+
+    all_info = page.find_all(SECT,
+                             class_=CL_HOSPITALS, id=ID_HOSPITALS)
+
+    if len(all_info) > 0:
+        cur_info = [s for s in all_info[0].stripped_strings][3:]
+    else:
+        cur_info = []
+
+    i = 0
+    hosp_list = []
+
+    while i < len(cur_info):
+        hosp_dict = {C_HOSP_CODE:
+                         retrieve_code_from_name(
+                             cur_info[i] + f' ({cur_info[i+1]})',
+                             db_hospitals, conn,
+                             HOSP_TABLE, C_HOSP_CODE, C_HOSP_NAME
+                         )
+                     }
+        hosp_list.append(hosp_dict)
+        i += 2
+    record[MD_HOSPITALS] = hosp_list
     print(record)
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/

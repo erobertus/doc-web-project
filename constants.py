@@ -5,10 +5,19 @@ ALL_DR_SEARCH_CHECKMARK = \
 CPSONO_FIELD = "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
                "AllDoctorsSearch$txtCPSONumberGeneral"
 DELIM_COMMA = ','
+DIV = 'div'
+SECT = 'section'
 CL_DR_INFO = 'doctor-info'
 CL_INFO = 'info'
 CL_PRACTICE_LOC = 'practice-location'
 CL_ADD_PR_LOC = 'location_details'
+
+CL_SPECIALTIES = 'doctor-detail-section'
+ID_SPECIALTIES = 'specialties'
+
+CL_HOSPITALS = CL_SPECIALTIES
+ID_HOSPITALS = 'hospital_priv'
+
 C_FNAME = 'first_name'
 C_LNAME = 'last_name'
 C_MNAME = 'middle_name'
@@ -21,6 +30,7 @@ C_REG_EXP_DATE = 'reg_exp_date'
 WEB_MEMBER_STAT = 'MEMBER STATUS'
 WEB_CPSO_REG_CL = 'CPSO REGISTRATION CLASS'
 WEB_EXPIRY_DATE = 'EXPIRY DATE'
+
 REG_CLASS_TABLE = 'z847e_MD_reg_classes'
 C_REG_CLASS_CODE = 'reg_class_code'
 C_REG_CLASS_NAME = 'reg_class_name'
@@ -72,6 +82,24 @@ COUNTY_TAG = 'County:'
 E_DISTR_TAG = 'Electoral District:'
 
 CANADA = 'Canada'
+
+SPEC_TABLE = 'z847e_MD_spec_list'
+C_SPEC_CODE = 'spec_code'
+C_SPEC_NAME = 'spec_name'
+C_SPEC_DATE = 'spec_issue_date'
+
+STYPE_TABLE = 'z847e_MD_spec_types'
+C_STYPE_CODE = 'spec_type_code'
+C_STYPE_NAME = 'spec_type_name'
+
+MD_SPECIALTIES = 'specialties'
+
+HOSP_TABLE = 'z847e_MD_hospitals'
+C_HOSP_CODE = 'hosp_code'
+C_HOSP_NAME = 'hosp_name'
+
+MD_HOSPITALS = 'hospitals'
+
 
 WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
               E_DISTR_TAG: C_ADDR_DISTRICT, COUNTY_TAG: C_ADDR_COUNTY,
