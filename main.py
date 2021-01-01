@@ -43,6 +43,7 @@ def update_reference(status: str, statuses: dict,
         statuses[status] = result
 
     else:
+        # test comment here
         curs.execute(f'SELECT {code_col} as code_col '
                      f'FROM {table} WHERE {name_col} = ?', (status,))
         for (result,) in curs:
@@ -68,10 +69,27 @@ def processs_address(source: 'bs4.element.ResultSet') -> dict:
 
     addr_dict = {}
     addr_list = []
+    i = 0
+
     while i < len(source):
         addr_list = [s for s in source[i].stripped_strings]
 
+        j = 0
+        at_top_of_addr = True
+
         while j < len(addr_list):
+            if at_top_of_addr:
+                # init vars
+                streets = []
+                addr_line = 1
+
+            if addr_list[j].find(POSTAL_SEPARATOR) > -1:
+                # we are on the line with city, province, postal
+                cur_info = addr_list[j].split(POSTAL_SEPARATOR)
+                addr_dict[C_ADDR_CITY] = cur_info[0]
+                addr_dict[C_ADDR_PROV] = cur_info[1]
+                addr_dict[C_ADDR_POSTAL] = cur_info[3]
+
             print(j, addr_element)
 
             j += 1

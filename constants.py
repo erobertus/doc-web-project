@@ -51,4 +51,13 @@ REG_JUR_TABLE = 'z847e_MD_reg_jurisdiction'
 C_JUR_CODE = 'jur_code'
 C_JUR_NAME = 'jur_name'
 
+C_ADDR_PREFIX = 'address_'
+C_ADDR_CITY = 'city'
+C_ADDR_PROV = 'prov_code'
+C_ADDR_POSTAL = 'postal_code'
+C_ADDR_COUNTRY = 'country'
+C_ADDR_DISTRICT = 'district_no'
+C_ADDR_ORDER = 'order_no'
+POSTAL_SEPARATOR = '\xa0'
+
 WEB2DB_MAP = {WEB_FRMR_NAME: 'former_name'}
