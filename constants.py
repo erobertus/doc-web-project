@@ -75,7 +75,7 @@ C_ADDR_FAX_NO = 'fax_no'
 C_ADDR_COUNTY = 'county'
 
 
-POSTAL_SEPARATOR = r'\xa0'
+POSTAL_SEPARATOR = '\xa0'
 PHONE_TAG = 'Phone:'
 FAX_TAG = 'Fax:'
 COUNTY_TAG = 'County:'
@@ -99,6 +99,8 @@ C_HOSP_CODE = 'hosp_code'
 C_HOSP_NAME = 'hosp_name'
 
 MD_HOSP_TABLE = 'z847e_MD_doc_x_hosp'
+
+
 
 WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
               E_DISTR_TAG: C_ADDR_DISTRICT, COUNTY_TAG: C_ADDR_COUNTY,
