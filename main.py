@@ -102,6 +102,7 @@ def processs_address(source: 'ResultSet') -> list[dict]:
             if at_top_of_addr:
                 addr_line = 1
                 addr_order += 1
+                addr_dict[C_ADDR_ORDER] = addr_order
                 streets_filled = False
 
             if addr_list[j].find(POSTAL_SEPARATOR) > -1:
@@ -153,20 +154,40 @@ def processs_address(source: 'ResultSet') -> list[dict]:
     return return_list
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    # Connect to MariaDB Platform
-    try:
-        conn = mariadb.connect(
-            user="faxcomet_scrape",
-            password="NnBgmX$t^+tG",
-            host="faxcomet.com",
-            port=3306,
-            database="faxcomet_MD_list"
-        )
-    except mariadb.Error as e:
-        print(f"Error connecting to MariaDB Platform: {e}")
-        sys.exit(1)
+def update_x_table(in_db: 'connection', table: str,
+                   key_col: str, key: str,
+                   val_col: str, values: list):
+    save_commit_state = in_db.autocommit
+    in_db.autocommit = False
+    curs = in_db.cursor()
+
+    str_list = ', '.join([str(s) for s in values])
+
+    # DELETE VALUES NOT IN values
+    stmt = f'DELETE FROM {table} WHERE {key_col} = ? ' \
+           f'AND {val_col} NOT IN ({str_list})'
+
+    curs.execute(stmt, (key,))
+
+    # GET LIST OF EXISTING VALUES
+    stmt = f'SELECT {val_col} FROM {table} WHERE {key_col} = ? ' \
+           f'AND {val_col} IN ({str_list})'
+
+    curs.execute(stmt, (key,))
+    db_values = [s for (s, ) in curs]
+
+    for value in values:
+        if value not in db_values:
+            stmt = f'INSERT INTO {table} ({key_col}, {val_col}) ' \
+                   f'VALUES (?, ?)'
+            curs.execute(stmt, (key, value))
+
+    in_db.commit()
+    in_db.autocommit = save_commit_state
+    pass
+
+
+def process_record(conn: 'connection', cpso_list: list) -> int:
 
     db_statuses = refresh_ref_from_db(conn, REG_STAT_TABLE,
                                       C_REG_STAT_CODE,
@@ -265,7 +286,7 @@ if __name__ == '__main__':
                             LANGUAGE_TABLE, C_LANG_CODE, C_LANG_NAME
                         )
                     )
-                record[MD_LANGUAGES] = lang_codes
+                record[MD_LANG_TABLE] = lang_codes
                 i += 1
             elif info[i] == WEB_UNIVERSITY:
                 education = re.sub(', +', DELIM_COMMA,
@@ -292,7 +313,7 @@ if __name__ == '__main__':
             i += 1
 
     all_info = page.find_all(DIV, class_=CL_ADD_PR_LOC)
-    record[MD_ADDRESSES] = processs_address(all_info)
+    record[MD_ADDR_TABLE] = processs_address(all_info)
 
     all_info = page.find_all(SECT,
                              class_=CL_SPECIALTIES,
@@ -322,7 +343,7 @@ if __name__ == '__main__':
         spec_list.append(spec_dict)
         i += 3
 
-    record[MD_SPECIALTIES] = spec_list
+    record[MD_SPEC_TABLE] = spec_list
 
     all_info = page.find_all(SECT,
                              class_=CL_HOSPITALS, id=ID_HOSPITALS)
@@ -336,16 +357,35 @@ if __name__ == '__main__':
     hosp_list = []
 
     while i < len(cur_info):
-        hosp_dict = {C_HOSP_CODE:
-                         retrieve_code_from_name(
+
+        hosp_list.append(retrieve_code_from_name(
                              cur_info[i] + f' ({cur_info[i+1]})',
                              db_hospitals, conn,
                              HOSP_TABLE, C_HOSP_CODE, C_HOSP_NAME
-                         )
-                     }
-        hosp_list.append(hosp_dict)
+                         ))
         i += 2
-    record[MD_HOSPITALS] = hosp_list
+    record[MD_HOSP_TABLE] = hosp_list
 
+    update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
+                   C_LANG_CODE, record[MD_LANG_TABLE])
     print(record)
+
+    return 1
+
+# Press the green button in the gutter to run the script.
+if __name__ == '__main__':
+    # Connect to MariaDB Platform
+    try:
+        connect_db = mariadb.connect(
+            user="faxcomet_scrape",
+            password="NnBgmX$t^+tG",
+            host="faxcomet.com",
+            port=3306,
+            database="faxcomet_MD_list"
+        )
+    except mariadb.Error as e:
+        print(f"Error connecting to MariaDB Platform: {e}")
+        sys.exit(1)
+
+    process_record(connect_db, [TEST_CPSO])
 

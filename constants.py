@@ -44,7 +44,7 @@ C_GENDER_CODE = 'gender_code'
 C_GENDER_NAME = 'gender_name'
 C_MD_GENDER = 'gender'
 WEB_LANGUAGES = 'Languages Spoken:'
-MD_LANGUAGES = WEB_LANGUAGES
+MD_LANG_TABLE = 'z847e_MD_doc_x_lang'
 LANGUAGE_TABLE = 'z847e_MD_languages'
 C_LANG_CODE = 'lang_code'
 C_LANG_NAME = 'lang_name'
@@ -57,7 +57,7 @@ WEB_DATE_OF_DEATH = 'Date of Death:'
 C_DATE_OF_DEATH = 'date_of_death'
 WEB_REG_IN_OTHER_JUR = 'Medical Licences in Other Jurisdictions'
 MD_REG_JURISDIC = WEB_REG_IN_OTHER_JUR
-MD_ADDRESSES = 'Practice Addresses'
+MD_ADDR_TABLE = 'MD_addresses'
 REG_JUR_TABLE = 'z847e_MD_reg_jurisdiction'
 C_JUR_CODE = 'jur_code'
 C_JUR_NAME = 'jur_name'
@@ -92,13 +92,14 @@ STYPE_TABLE = 'z847e_MD_spec_types'
 C_STYPE_CODE = 'spec_type_code'
 C_STYPE_NAME = 'spec_type_name'
 
-MD_SPECIALTIES = 'specialties'
+MD_SPEC_TABLE = 'z847e_MD_doc_x_spec'
 
 HOSP_TABLE = 'z847e_MD_hospitals'
 C_HOSP_CODE = 'hosp_code'
 C_HOSP_NAME = 'hosp_name'
 
-MD_HOSPITALS = 'hospitals'
+MD_HOSP_TABLE = 'z847e_MD_doc_x_hosp'
+
 
 
 WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
@@ -106,4 +107,4 @@ WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
               WEB_DATE_OF_DEATH: C_DATE_OF_DEATH,
               WEB_GENDER: C_MD_GENDER}
 
-TEST_CPSO = 82832
+TEST_CPSO = 70079
