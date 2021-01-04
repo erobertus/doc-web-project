@@ -11,12 +11,15 @@ CL_DR_INFO = 'doctor-info'
 CL_INFO = 'info'
 CL_PRACTICE_LOC = 'practice-location'
 CL_ADD_PR_LOC = 'location_details'
+CL_ERROR = 'global-error-msg'
 
 CL_SPECIALTIES = 'doctor-detail-section'
 ID_SPECIALTIES = 'specialties'
 
 CL_HOSPITALS = CL_SPECIALTIES
 ID_HOSPITALS = 'hospital_priv'
+
+MD_DIR_TABLE = 'z847e_MD_dir'
 
 C_FNAME = 'first_name'
 C_LNAME = 'last_name'
@@ -43,6 +46,7 @@ GENDER_TABLE = 'MD_genders'
 C_GENDER_CODE = 'gender_code'
 C_GENDER_NAME = 'gender_name'
 C_MD_GENDER = 'gender'
+C_DEF_ADDR = 'def_address'
 WEB_LANGUAGES = 'Languages Spoken:'
 MD_LANG_TABLE = 'z847e_MD_doc_x_lang'
 LANGUAGE_TABLE = 'z847e_MD_languages'
@@ -56,7 +60,7 @@ UNIV_TABLE = 'z847e_MD_universities'
 WEB_DATE_OF_DEATH = 'Date of Death:'
 C_DATE_OF_DEATH = 'date_of_death'
 WEB_REG_IN_OTHER_JUR = 'Medical Licences in Other Jurisdictions'
-MD_REG_JURISDIC = WEB_REG_IN_OTHER_JUR
+MD_REG_JURISDIC = 'z847e_MD_doc_x_jurisdiction'
 MD_ADDR_TABLE = 'MD_addresses'
 REG_JUR_TABLE = 'z847e_MD_reg_jurisdiction'
 C_JUR_CODE = 'jur_code'
@@ -73,9 +77,9 @@ C_ADDR_PHONE_NO = 'phone_no'
 C_ADDR_EXT = 'ext_no'
 C_ADDR_FAX_NO = 'fax_no'
 C_ADDR_COUNTY = 'county'
+C_ADDR_IS_DEF = 'isDefault'
 
-
-POSTAL_SEPARATOR = r'\xa0'
+POSTAL_SEPARATOR = '\xa0'
 PHONE_TAG = 'Phone:'
 FAX_TAG = 'Fax:'
 COUNTY_TAG = 'County:'
@@ -105,4 +109,61 @@ WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
               WEB_DATE_OF_DEATH: C_DATE_OF_DEATH,
               WEB_GENDER: C_MD_GENDER}
 
-TEST_CPSO = 70079
+T_KEY = 'key'
+T_VAL = 'val'
+T_FKEY = 'fkey'
+
+DB_SCHEMA = {SPEC_TABLE: {T_KEY: C_SPEC_CODE},
+             STYPE_TABLE: {T_KEY: C_STYPE_CODE,
+                           T_VAL: C_STYPE_NAME},
+             HOSP_TABLE: {T_KEY: C_HOSP_CODE, T_VAL: C_HOSP_NAME},
+             MD_DIR_TABLE: {T_KEY: C_CPSO_NO},
+             MD_LANG_TABLE: {T_KEY: C_CPSO_NO, T_VAL: C_LANG_CODE},
+             MD_HOSP_TABLE: {T_KEY: C_CPSO_NO, T_VAL: C_HOSP_CODE},
+             MD_ADDR_TABLE: {T_KEY: C_CPSO_NO, T_FKEY: C_DEF_ADDR},
+             MD_SPEC_TABLE: {T_KEY: C_CPSO_NO},
+             MD_REG_JURISDIC: {T_KEY: C_CPSO_NO, T_VAL: C_JUR_CODE}
+             }
+
+TEST_CPSO = (100174, 100175, 100023, 10022, 70079, 94129, 115098, 10065, 22278, 110310, 82099, 86495)
+
+FINAL_SQL = ["UPDATE MD_addresses "
+             "SET phone_no_clean = "
+             r"regexp_replace(phone_no, '\\D', ''), "
+             r"fax_no_clean = regexp_replace(fax_no, '\\D', '') ",
+             "UPDATE MD_addresses "
+             "SET fax_no_email = CONCAT(fax_no_clean, "
+             "'@rcfaxbroadcast.com') "
+             "WHERE COALESCE(fax_no_clean, '') <> '' ",
+             "UPDATE MD_addresses "
+             "SET postal_code = upper(regexp_replace(postal_code, "
+             "'[^A-z0-9]', '')) "
+             "WHERE postal_code REGEXP "
+             "'[A-z][0-9][A-z][^A-z0-9]+[0-9][A-z][0-9]' ",
+             "UPDATE MD_addresses "
+             "SET postal_code_clean = postal_code "
+             "WHERE postal_code "
+             "REGEXP '[A-Z][0-9][A-Z][0-9][A-Z][0-9]' ",
+             "UPDATE MD_addresses "
+             "SET postal_code = insert(postal_code_clean, 4, 0, ' ') "
+             "WHERE postal_code_clean "
+             "REGEXP '[A-Z][0-9][A-Z][0-9][A-Z][0-9]'",
+             "UPDATE z847e_MD_dir d "
+             "JOIN MD_addresses adr ON adr.isDefault "
+             "AND d.CPSO_no = adr.CPSO_no AND adr.isActive "
+             "SET d.address_1 = adr.address_1, "
+             "d.address_2 = adr.address_2, "
+             "d.address_3 = adr.address_3, "
+             "d.address_4 = adr.address_4, "
+             "d.city = adr.city, d.prov_code = adr.prov_code, "
+             "d.postal_code = adr.postal_code, "
+             "d.country = adr.country, "
+             "d.addresses_raw = adr.address_raw, "
+             "d.phone_no = adr.phone_no, d.ext_no = adr.ext_no, "
+             "d.phone_no_clean = adr.phone_no_clean, "
+             "d.fax_no = adr.fax_no, "
+             "d.fax_no_clean = adr.fax_no_clean, "
+             "d.fax_no_email = adr.fax_no_email, "
+             "d.last_modified = NOW(), "
+             "d.district_no = adr.district_no"
+             ]
