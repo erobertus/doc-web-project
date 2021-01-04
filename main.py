@@ -99,6 +99,13 @@ def is_at_top_of_address(addr: list, position: int) -> bool:
     return result
 
 
+def next_value(in_lst: list):
+    if len(in_lst) > 1:
+        return in_lst[1]
+    else:
+        return ''
+
+
 def processs_address(source: 'ResultSet') -> list[dict]:
     addr_dict = {}
     return_list = []
@@ -129,17 +136,16 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                 else:
                     addr_dict[C_ADDR_POSTAL] = t_info[1]
 
-                if j + 1 < len(addr_list):
-                    if addr_list[j + 1] in (PHONE_TAG, FAX_TAG,
-                                            E_DISTR_TAG, COUNTY_TAG):
-                        addr_dict[C_ADDR_COUNTRY] = CANADA
-                    else:
-                        j += 1
-                        addr_dict[C_ADDR_COUNTRY] = addr_list[j]
+                if next_value(addr_list[j:]) in (
+                        PHONE_TAG, FAX_TAG, E_DISTR_TAG, COUNTY_TAG):
+                    addr_dict[C_ADDR_COUNTRY] = CANADA
+                else:
+                    j += 1
+                    addr_dict[C_ADDR_COUNTRY] = addr_list[j]
                 streets_filled = True
             elif addr_list[j] in (PHONE_TAG, FAX_TAG, E_DISTR_TAG):
-                if j + 1 < len(addr_list)-1:
-                    t_info = addr_list[j + 1].split(POSTAL_SEPARATOR)
+                t_info = next_value(addr_list[j:]). \
+                    split(POSTAL_SEPARATOR)
 
                 if is_numeric(t_info[0]):
                     addr_dict[WEB2DB_MAP[addr_list[j]]] = t_info[0]
@@ -148,8 +154,9 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                         addr_dict[C_ADDR_EXT] = t_info[2]
                     j += 1
             elif addr_list[j] == COUNTY_TAG and \
-                    addr_list[j + 1] != E_DISTR_TAG:
-                addr_dict[WEB2DB_MAP[COUNTY_TAG]] = addr_list[j + 1]
+                    next_value(addr_list[j:]) != E_DISTR_TAG:
+                addr_dict[WEB2DB_MAP[COUNTY_TAG]] = \
+                    next_value(addr_list[j:])
                 j += 1
 
             if not streets_filled:
@@ -243,9 +250,12 @@ def update_record(in_db: 'connection', records: list,
             val_str = ', '.join('?' * len(cur_rec))
             stmt = f'INSERT INTO {table} ({col_str}) ' \
                    f'VALUES({val_str})'
-            curs.execute(stmt, tuple(cur_rec.values()))
-            if iteration == 1:
-                result = curs.lastrowid
+            try:
+                curs.execute(stmt, tuple(cur_rec.values()))
+                if iteration == 1:
+                    result = curs.lastrowid
+            except mariadb.Error as e:
+                print(f"!!! DB error: {e}")
 
     in_db.commit()
     in_db.autocommit = save_commit_state
@@ -296,8 +306,12 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
     response = browser.submit_selected()
     record = {C_CPSO_NO: cur_CPSO}
     page = response.soup
-    error_str = page.find_all(DIV, class_=CL_ERROR)
-    if len(error_str) == 0:
+    error_str = ''
+
+    if response.status_code == 200:
+        error_str = page.find_all(DIV, class_=CL_ERROR)
+
+    if response.status_code == 200 and len(error_str) == 0:
         name = re.sub(r'(\r\n|\t|\s)', ' ', page.h1.string).strip()
         names = name.split()
         record[C_LNAME] = names[0].strip(',')
@@ -326,7 +340,8 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                     REG_CLASS_TABLE, C_REG_CLASS_CODE,
                     C_REG_CLASS_NAME)
                 if len(info[1][1]) > 0:
-                    record[C_REG_CLASS_DATE] = reformat_date(info[1][1])
+                    record[C_REG_CLASS_DATE] = reformat_date(
+                        info[1][1])
 
             # print(info)
 
@@ -337,18 +352,18 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
             i = 0
             while i < len(info) - 1:
                 if info[i] == WEB_FRMR_NAME:
-                    record[C_FRMR_NAME] = info[i + 1]
+                    record[C_FRMR_NAME] = next_value(info[i:])
                     i += 1
                 elif info[i] == WEB_GENDER:
                     record[WEB2DB_MAP[WEB_GENDER]] = \
                         retrieve_code_from_name(
-                            info[i + 1], db_genders, conn,
+                            next_value(info[i:]), db_genders, conn,
                             GENDER_TABLE, C_GENDER_CODE, C_GENDER_NAME
                         )
                     i += 1
                 elif info[i] == WEB_LANGUAGES:
                     md_languages = re.sub(', +', DELIM_COMMA,
-                                          info[i + 1]
+                                          next_value(info[i:])
                                           ).split(DELIM_COMMA)
                     lang_codes = []
                     for language in md_languages:
@@ -362,8 +377,10 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                     record[MD_LANG_TABLE] = lang_codes
                     i += 1
                 elif info[i] == WEB_UNIVERSITY:
-                    education = re.sub(', +', DELIM_COMMA,
-                                       info[i + 1]).split(DELIM_COMMA)
+                    education = \
+                        re.sub(', +', DELIM_COMMA,
+                               next_value(info[i:])
+                               ).split(DELIM_COMMA)
                     record[C_UNIV_CODE] = retrieve_code_from_name(
                         ', '.join(education[:-1]),
                         db_universities,
@@ -373,7 +390,7 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                     i += 1
                 elif info[i] == WEB_DATE_OF_DEATH:
                     record[WEB2DB_MAP[WEB_DATE_OF_DEATH]] = \
-                        reformat_date(info[i + 1])
+                        reformat_date(next_value(info[i:]))
                     i += 1
                 elif info[i] == WEB_REG_IN_OTHER_JUR:
 
@@ -405,11 +422,11 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
 
         while i < len(cur_info):
             spec_dict = {C_SPEC_CODE:
-                retrieve_code_from_name(
-                    cur_info[i], db_specialties, conn,
-                    SPEC_TABLE, C_SPEC_CODE, C_SPEC_NAME
-                )}
-            if i + 1 < len(cur_info):
+                retrieve_code_from_name(cur_info[i], db_specialties,
+                                        conn, SPEC_TABLE, C_SPEC_CODE,
+                                        C_SPEC_NAME)
+            }
+            if i + 2 < len(cur_info):
                 spec_dict[C_SPEC_DATE] = \
                     reformat_date(cur_info[i + 1].split(':')[1])
                 spec_dict[C_STYPE_CODE] = retrieve_code_from_name(
@@ -426,22 +443,27 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                                  class_=CL_HOSPITALS, id=ID_HOSPITALS)
 
         if len(all_info) > 0:
-            cur_info = [s for s in all_info[0].stripped_strings][3:]
+            cur_info = [s for s in all_info[0].stripped_strings]
         else:
             cur_info = []
 
-        i = 0
         hosp_list = []
 
-        while i < len(cur_info):
-            hosp_list.append(retrieve_code_from_name(
-                cur_info[i] + f' ({cur_info[i + 1]})',
-                db_hospitals, conn,
-                HOSP_TABLE, C_HOSP_CODE, C_HOSP_NAME
-            ))
-            i += 2
-        if len(hosp_list) == 0:
-            hosp_list.append(1)
+        if len(cur_info) > 0:
+            if cur_info[1] == WEB_NO_HOSP:
+                hosp_list.append(retrieve_code_from_name(
+                    cur_info[1], db_hospitals, conn,
+                    HOSP_TABLE, C_HOSP_CODE, C_HOSP_NAME
+                ))
+            else:
+                i = 3
+                while i < len(cur_info):
+                    hosp_list.append(retrieve_code_from_name(
+                        cur_info[i] + f' ({cur_info[i + 1]})',
+                        db_hospitals, conn,
+                        HOSP_TABLE, C_HOSP_CODE, C_HOSP_NAME
+                    ))
+                    i += 2
         record[MD_HOSP_TABLE] = hosp_list
 
         update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
@@ -467,14 +489,15 @@ if __name__ == '__main__':
         print(f"Error connecting to MariaDB Platform: {e}")
         sys.exit(1)
 
-    # for cpso_no in range(100000,150000): # TEST_CPSO:
-    for cpso_no in TEST_CPSO:
+    curs = connect_db.cursor()
+    for cpso_no in range(101079,150000): # TEST_CPSO:
+    # for cpso_no in TEST_CPSO:
         all_recs = process_record(connect_db, cpso_no)
         update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
 
-    curs = connect_db.cursor()
-    for s in FINAL_SQL:
-        curs.execute(s)
+        for s in FINAL_SQL:
+            curs.execute(s, (cpso_no,))
 
-    connect_db.commit()
+        connect_db.commit()
+
     connect_db.close()

@@ -102,6 +102,7 @@ HOSP_TABLE = 'z847e_MD_hospitals'
 C_HOSP_CODE = 'hosp_code'
 C_HOSP_NAME = 'hosp_name'
 
+WEB_NO_HOSP = 'No Privileges reported.'
 MD_HOSP_TABLE = 'z847e_MD_doc_x_hosp'
 
 WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
@@ -125,29 +126,41 @@ DB_SCHEMA = {SPEC_TABLE: {T_KEY: C_SPEC_CODE},
              MD_REG_JURISDIC: {T_KEY: C_CPSO_NO, T_VAL: C_JUR_CODE}
              }
 
-TEST_CPSO = (100174, 100175, 100023, 10022, 70079, 94129, 115098, 10065, 22278, 110310, 82099, 86495)
+TEST_CPSO = (101079, 101080, 100326,
+             100248, 70079, 100249, 100174, 100175, 100023, 10022,
+             94129, 115098, 10065, 22278, 110310, 82099, 86495)
 
 FINAL_SQL = ["UPDATE MD_addresses "
              "SET phone_no_clean = "
              r"regexp_replace(phone_no, '\\D', ''), "
-             r"fax_no_clean = regexp_replace(fax_no, '\\D', '') ",
+             r"fax_no_clean = regexp_replace(fax_no, '\\D', '') "
+             f"WHERE cpso_no = ?",
+
              "UPDATE MD_addresses "
              "SET fax_no_email = CONCAT(fax_no_clean, "
              "'@rcfaxbroadcast.com') "
-             "WHERE COALESCE(fax_no_clean, '') <> '' ",
+             "WHERE COALESCE(fax_no_clean, '') <> '' "
+             "AND cpso_no = ?",
+
              "UPDATE MD_addresses "
              "SET postal_code = upper(regexp_replace(postal_code, "
              "'[^A-z0-9]', '')) "
              "WHERE postal_code REGEXP "
-             "'[A-z][0-9][A-z][^A-z0-9]+[0-9][A-z][0-9]' ",
+             "'[A-z][0-9][A-z][^A-z0-9]+[0-9][A-z][0-9]' "
+             "AND cpso_no = ?",
+
              "UPDATE MD_addresses "
              "SET postal_code_clean = postal_code "
              "WHERE postal_code "
-             "REGEXP '[A-Z][0-9][A-Z][0-9][A-Z][0-9]' ",
+             "REGEXP '[A-Z][0-9][A-Z][0-9][A-Z][0-9]' "
+             "AND cpso_no = ?",
+
              "UPDATE MD_addresses "
              "SET postal_code = insert(postal_code_clean, 4, 0, ' ') "
              "WHERE postal_code_clean "
-             "REGEXP '[A-Z][0-9][A-Z][0-9][A-Z][0-9]'",
+             "REGEXP '[A-Z][0-9][A-Z][0-9][A-Z][0-9]' "
+             "AND cpso_no = ?",
+
              "UPDATE z847e_MD_dir d "
              "JOIN MD_addresses adr ON adr.isDefault "
              "AND d.CPSO_no = adr.CPSO_no AND adr.isActive "
@@ -165,5 +178,6 @@ FINAL_SQL = ["UPDATE MD_addresses "
              "d.fax_no_clean = adr.fax_no_clean, "
              "d.fax_no_email = adr.fax_no_email, "
              "d.last_modified = NOW(), "
-             "d.district_no = adr.district_no"
+             "d.district_no = adr.district_no "
+             "WHERE d.cpso_no = ?"
              ]
