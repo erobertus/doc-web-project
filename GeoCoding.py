@@ -8,6 +8,7 @@ gmaps = googlemaps.Client(key='AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4')
 # Geocoding an address
 geocode_result = gmaps.geocode('9651 Yonge Street ,Richmond Hill, ON')
 
+print(geocode_result[0]['geometry']['location'])
 # Look up an address with reverse geocoding
 reverse_geocode_result = gmaps.reverse_geocode((40.714224, -73.961452))
 
