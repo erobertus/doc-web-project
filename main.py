@@ -186,6 +186,17 @@ def update_x_table(in_db: 'connection', table: str,
     in_db.autocommit = save_commit_state
     pass
 
+def update_record(in_db: 'connection', record: list) -> int:
+    save_commit_state = in_db.autocommit
+    in_db.autocommit = False
+    curs = in_db.cursor()
+
+    for cur_rec in record:
+        pass
+
+    in_db.commit()
+    in_db.autocommit = save_commit_state
+    return 1
 
 def process_record(conn: 'connection', cpso_list: list) -> int:
 
@@ -368,6 +379,7 @@ def process_record(conn: 'connection', cpso_list: list) -> int:
 
     update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
                    C_LANG_CODE, record[MD_LANG_TABLE])
+
     print(record)
 
     return 1
