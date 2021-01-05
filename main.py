@@ -474,7 +474,9 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
         update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
                        C_LANG_CODE, record[MD_LANG_TABLE])
 
-        print(record)
+        print(f'{record[C_CPSO_NO]}: {record[C_LNAME]}, '
+              f'{record[C_FNAME]}, Practice: '
+              f'{record[MD_ADDR_TABLE][0]}')
 
     return [record]
 
