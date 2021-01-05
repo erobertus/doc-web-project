@@ -316,8 +316,11 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
         name = re.sub(r'(\r\n|\t|\s)', ' ', page.h1.string).strip()
         names = name.split()
         record[C_LNAME] = names[0].strip(',')
-        record[C_FNAME] = names[1]
-        record[C_MNAME] = ' '.join(names[2:])
+        if len(names) > 1:
+            record[C_FNAME] = names[1]
+
+            if len(names) > 2:
+                record[C_MNAME] = ' '.join(names[2:])
 
         all_info = page.find_all(DIV, class_=CL_DR_INFO)
 
@@ -491,7 +494,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     curs = connect_db.cursor()
-    for cpso_no in range(101079,150000): # TEST_CPSO:
+    for cpso_no in range(101170,150000): # TEST_CPSO:
     # for cpso_no in TEST_CPSO:
         all_recs = process_record(connect_db, cpso_no)
         update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
