@@ -138,7 +138,8 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                     addr_dict[C_ADDR_POSTAL] = t_info[1]
 
                 if next_value(addr_list[j:]) in (
-                        PHONE_TAG, FAX_TAG, E_DISTR_TAG, COUNTY_TAG):
+                        PHONE_TAG, FAX_TAG,
+                        E_DISTR_TAG, COUNTY_TAG, BLANK):
                     addr_dict[C_ADDR_COUNTRY] = CANADA
                 else:
                     j += 1
@@ -161,8 +162,8 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                 j += 1
 
             if not streets_filled:
-                addr_dict[C_ADDR_PREFIX + str(addr_line)] = addr_list[
-                    j]
+                addr_dict[C_ADDR_PREFIX + str(addr_line)] = \
+                    addr_list[j]
                 addr_line += 1
                 at_top_of_addr = False
 
@@ -494,7 +495,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     curs = connect_db.cursor()
-    for cpso_no in range(101170,150000): # TEST_CPSO:
+    for cpso_no in range(102175,150000): # TEST_CPSO:
     # for cpso_no in TEST_CPSO:
         all_recs = process_record(connect_db, cpso_no)
         update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)

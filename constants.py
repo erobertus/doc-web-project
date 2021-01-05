@@ -5,6 +5,7 @@ ALL_DR_SEARCH_CHECKMARK = \
 CPSONO_FIELD = "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
                "AllDoctorsSearch$txtCPSONumberGeneral"
 DELIM_COMMA = ','
+BLANK = ''
 DIV = 'div'
 SECT = 'section'
 CL_DR_INFO = 'doctor-info'
@@ -126,7 +127,7 @@ DB_SCHEMA = {SPEC_TABLE: {T_KEY: C_SPEC_CODE},
              MD_REG_JURISDIC: {T_KEY: C_CPSO_NO, T_VAL: C_JUR_CODE}
              }
 
-TEST_CPSO = (101169, 101170, 101079, 101080, 100326,
+TEST_CPSO = (102165, 102166, 101169, 101170, 101079, 101080, 100326,
              100248, 70079, 100249, 100174, 100175, 100023, 10022,
              94129, 115098, 10065, 22278, 110310, 82099, 86495)
 
