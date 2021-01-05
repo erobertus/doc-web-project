@@ -155,11 +155,13 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                             len(t_info) > 1:
                         addr_dict[C_ADDR_EXT] = t_info[2]
                     j += 1
+                streets_filled = True
             elif addr_list[j] == COUNTY_TAG and \
                     next_value(addr_list[j:]) != E_DISTR_TAG:
                 addr_dict[WEB2DB_MAP[COUNTY_TAG]] = \
                     next_value(addr_list[j:])
                 j += 1
+                streets_filled = True
 
             if not streets_filled:
                 addr_dict[C_ADDR_PREFIX + str(addr_line)] = \
@@ -497,7 +499,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     curs = connect_db.cursor()
-    for cpso_no in range(102175,150000): # TEST_CPSO:
+    for cpso_no in range(108493,150000): # TEST_CPSO:
     # for cpso_no in TEST_CPSO:
         all_recs = process_record(connect_db, cpso_no)
         update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
