@@ -477,8 +477,7 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                        C_LANG_CODE, record[MD_LANG_TABLE])
 
         print(f'{record[C_CPSO_NO]}: {record[C_LNAME]}, '
-              f'{record[C_FNAME]}, Practice: '
-              f'{record[MD_ADDR_TABLE][0]}')
+              f'{record[C_FNAME]}, {record[MD_ADDR_TABLE][0]["address_1"]}')
 
     return [record]
 
