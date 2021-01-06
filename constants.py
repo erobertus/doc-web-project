@@ -111,6 +111,23 @@ WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
               WEB_DATE_OF_DEATH: C_DATE_OF_DEATH,
               WEB_GENDER: C_MD_GENDER}
 
+PREFIX = 'pre'
+SUFFIX = 'post'
+LABEL = 'label'
+
+PRES_MAP = {C_CPSO_NO: {LABEL: 'CPSO ', SUFFIX: ':'},
+            C_LNAME: {LABEL: 'Name: ', SUFFIX: ','},
+            C_ADDR_PREFIX + '1': {LABEL: '\n   Address: '},
+            C_ADDR_PREFIX + '2': {PREFIX: ', '},
+            C_ADDR_PREFIX + '3': {PREFIX: ', '},
+            C_ADDR_PREFIX + '4': {PREFIX: ', '},
+            C_ADDR_CITY: {PREFIX: ', '},
+            C_ADDR_POSTAL: {PREFIX: '  ', SUFFIX: ','},
+            C_FRMR_NAME: {PREFIX: ' A.K.A.: '},
+            C_ADDR_PHONE_NO: {PREFIX: ', Phone: '},
+            C_ADDR_FAX_NO: {PREFIX: ', Fax: '}
+            }
+
 T_KEY = 'key'
 T_VAL = 'val'
 T_FKEY = 'fkey'
@@ -127,9 +144,10 @@ DB_SCHEMA = {SPEC_TABLE: {T_KEY: C_SPEC_CODE},
              MD_REG_JURISDIC: {T_KEY: C_CPSO_NO, T_VAL: C_JUR_CODE}
              }
 
-TEST_CPSO = (70129, 70130, 108493,
+TEST_CPSO = (84993, 85144, 85179, 85950, 87827, 87890, 90572,
+             100175, 70129, 110259, 110260, 70130, 108493,
              102165, 102166, 101169, 101170, 101079, 101080, 100326,
-             100248, 70079, 100249, 100174, 100175, 100023, 10022,
+             100248, 70079, 100249, 100174, 100023, 10022,
              94129, 115098, 10065, 22278, 110310, 82099, 86495)
 
 FINAL_SQL = ["UPDATE MD_addresses "

@@ -107,6 +107,11 @@ def next_value(in_lst: list):
         return ''
 
 
+def is_postal(s: str) -> bool:
+    re_pattern = r'^.+\xa0.+\xa0{2}'
+    return re.search(re_pattern, s) is not None
+
+
 def processs_address(source: 'ResultSet') -> list[dict]:
     addr_dict = {}
     return_list = []
@@ -127,11 +132,11 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                 addr_dict[C_ADDR_IS_DEF] = int(addr_order == 1)
                 streets_filled = False
 
-            if addr_list[j].find(POSTAL_SEPARATOR) > -1:
+            if is_postal(addr_list[j]):
                 # we are on the line with city, province, postal
                 t_info = addr_list[j].split(POSTAL_SEPARATOR)
                 addr_dict[C_ADDR_CITY] = t_info[0]
-                if len(t_info) > 2:
+                if len(t_info) > 3:
                     addr_dict[C_ADDR_PROV] = t_info[1]
                     addr_dict[C_ADDR_POSTAL] = t_info[3]
                 else:
@@ -266,6 +271,40 @@ def update_record(in_db: 'connection', records: list,
     return result
 
 
+def walk_data(d, fields: tuple) -> list:
+    li = []
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if isinstance(v, dict) or isinstance(v, list):
+                li += walk_data(v, fields)
+            else:
+                if k in fields:
+                    li.append((k, str(v)))
+    elif isinstance(d, list):
+        for v in d:
+            if isinstance(v, dict) or isinstance(v, list):
+                li += walk_data(v, fields)
+    return li
+
+
+def print_rec(rec: dict, fields: tuple) -> str:
+    l = walk_data(rec, fields)
+    s = ''
+    for (i, (k, v)) in enumerate(l):
+        if k in PRES_MAP:
+            if LABEL in PRES_MAP[k]:
+                s += PRES_MAP[k][LABEL]
+            if PREFIX in PRES_MAP[k]:
+                s = s.rstrip() +  PRES_MAP[k][PREFIX]
+            s += v
+            if SUFFIX in PRES_MAP[k]:
+                s += PRES_MAP[k][SUFFIX]
+        else:
+            s += v
+        s += ' '
+    return s
+
+
 def process_record(conn: 'connection', cur_CPSO: int) -> list:
     db_statuses = refresh_ref_from_db(conn, REG_STAT_TABLE,
                                       C_REG_STAT_CODE,
@@ -298,7 +337,7 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
 
     result_dict = {}
 
-    browser = ms.StatefulBrowser()
+    browser = ms.StatefulBrowser(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0')
     url = 'https://doctors.cpso.on.ca/?search=general'
 
     browser.open(url)
@@ -317,13 +356,15 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
 
     if response.status_code == 200 and len(error_str) == 0:
         name = re.sub(r'(\r\n|\t|\s)', ' ', page.h1.string).strip()
-        names = name.split()
+        names = name.split(',')
         record[C_LNAME] = names[0].strip(',')
         if len(names) > 1:
-            record[C_FNAME] = names[1]
+            names[1] = names[1].split()
+            if len(names[1]) > 0:
+                record[C_FNAME] = names[1][0]
 
-            if len(names) > 2:
-                record[C_MNAME] = ' '.join(names[2:])
+                if len(names[1]) > 1:
+                    record[C_MNAME] = ' '.join(names[1][1:])
 
         all_info = page.find_all(DIV, class_=CL_DR_INFO)
 
@@ -429,10 +470,12 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
 
         while i < len(cur_info):
             spec_dict = {C_SPEC_CODE:
-                retrieve_code_from_name(cur_info[i], db_specialties,
-                                        conn, SPEC_TABLE, C_SPEC_CODE,
-                                        C_SPEC_NAME)
-            }
+                             retrieve_code_from_name(cur_info[i],
+                                                     db_specialties,
+                                                     conn, SPEC_TABLE,
+                                                     C_SPEC_CODE,
+                                                     C_SPEC_NAME)
+                         }
             if i + 2 < len(cur_info):
                 spec_dict[C_SPEC_DATE] = \
                     reformat_date(cur_info[i + 1].split(':')[1])
@@ -476,9 +519,15 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
         update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
                        C_LANG_CODE, record[MD_LANG_TABLE])
 
-        print(f'{record[C_CPSO_NO]}: {record[C_LNAME]}, '
-              f'{record[C_FNAME]}, {record[MD_ADDR_TABLE][0]["address_1"]}')
-
+        print(print_rec(record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
+                                 C_ADDR_PREFIX + '1',
+                                 C_ADDR_PREFIX + '2',
+                                 C_ADDR_PREFIX + '3',
+                                 C_ADDR_PREFIX + '4',
+                                 C_ADDR_CITY,
+                                 C_ADDR_PROV, C_ADDR_POSTAL,
+                                 C_ADDR_COUNTRY,
+                                 C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
     return [record]
 
 
@@ -498,8 +547,8 @@ if __name__ == '__main__':
         sys.exit(1)
 
     curs = connect_db.cursor()
-    for cpso_no in range(108493,150000): # TEST_CPSO:
-    # for cpso_no in TEST_CPSO:
+    # for cpso_no in range(108493,150000): # TEST_CPSO:
+    for cpso_no in TEST_CPSO:
         all_recs = process_record(connect_db, cpso_no)
         update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
 
