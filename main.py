@@ -132,8 +132,15 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                 addr_dict[C_ADDR_IS_DEF] = int(addr_order == 1)
                 streets_filled = False
 
-            if is_postal(addr_list[j]):
-                # we are on the line with city, province, postal
+            if addr_list[j].find(POSTAL_SEPARATOR) > -1 \
+                    and ((len(addr_list) > j+1 \
+                    and addr_list[j+1].find(POSTAL_SEPARATOR) == -1) \
+                    or len(addr_list) == j+1) :
+                # we are on the line:
+                # the line has \xa0 and may be one of the lines
+                # with city, province, postal. The logic
+                # for checking is either last line with \xa0 or
+                # the line with \xa0 with no following line
                 t_info = addr_list[j].split(POSTAL_SEPARATOR)
                 addr_dict[C_ADDR_CITY] = t_info[0]
                 if len(t_info) > 3:
@@ -429,12 +436,14 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                         re.sub(', +', DELIM_COMMA,
                                next_value(info[i:])
                                ).split(DELIM_COMMA)
-                    record[C_UNIV_CODE] = retrieve_code_from_name(
-                        ', '.join(education[:-1]),
-                        db_universities,
-                        conn, UNIV_TABLE, C_UNIV_CODE, C_UNIV_NAME
-                    )
-                    record[C_GRAD_YEAR] = education[-1]
+                    if len(education[0]) > 0:
+                        record[C_UNIV_CODE] = retrieve_code_from_name(
+                            ', '.join(education[:-1]),
+                            db_universities,
+                            conn, UNIV_TABLE, C_UNIV_CODE, C_UNIV_NAME
+                        )
+                        if len(education[-1]) > 0:
+                            record[C_GRAD_YEAR] = education[-1]
                     i += 1
                 elif info[i] == WEB_DATE_OF_DEATH:
                     record[WEB2DB_MAP[WEB_DATE_OF_DEATH]] = \
