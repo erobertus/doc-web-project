@@ -318,13 +318,16 @@ def request_workload(conn: 'connection',
                      interval=20,
                      min_val=10000,
                      max_val=150000,
-                     desc=False) -> tuple:
+                     desc=False,
+                     fill_gaps=True) -> tuple:
     curs = conn.cursor()
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
     curs.execute(stmt)
     batch_id = curs.lastrowid
     src_list = []
+
+    # make list
     if not random:
 
         # GET LIST OF CPSO NUMBERS
@@ -333,24 +336,40 @@ def request_workload(conn: 'connection',
         if desc:
             src_list.reverse()
 
+        stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
+               'WHERE (isCompleted AND ' \
+               'updated_date_time < NOW() - INTERVAL ' \
+               f'{interval} DAY) ' \
+               'OR (NOT isCompleted AND ' \
+               f'updated_date_time >= NOW()-INTERVAL {interval} DAY)'
+
+        curs.execute(stmt)
+
+        for cpso_no in curs
+            if cpso_no in src_list
+                src_list.remove(cpso_no)
+
         src_list = src_list[:batch_size]
 
-        # CHECK IF SOME NUMBERS NOT IN DB (?NEW)
-        stmt = f'SELECT COUNT(*) ' \
-               f'FROM {MD_DIR_TABLE} ' \
-               f'WHERE {C_CPSO_NO} = ?'
 
-        new_list = ()
-        for cur_val in src_list:
-            curs.execute(stmt, (cur_val,))
-            for (cnt,) in curs:
-                pass
-            if cnt == 0:
-                new_list += (cur_val,)
+
+        if fill_gaps:
+            # CHECK IF SOME NUMBERS NOT IN DB (?NEW)
+            stmt = f'SELECT COUNT(*) ' \
+                   f'FROM {MD_DIR_TABLE} ' \
+                   f'WHERE {C_CPSO_NO} = ?'
+
+            new_list = ()
+            for cur_val in src_list:
+                curs.execute(stmt, (cur_val,))
+                for (cnt,) in curs:
+                    pass
+                if cnt == 0:
+                    new_list += (cur_val,)
 
         in_str = ', '.join([str(x) for x in src_list])
 
-        # GET LIST OF AVAILABLE NUMBERS FORM DATABASE
+        # GET LIST OF AVAILABLE NUMBERS FROM DATABASE
         stmt = f'SELECT {C_CPSO_NO} ' \
                f'FROM {MD_DIR_TABLE} ' \
                f'WHERE {C_CPSO_NO} ' \
@@ -368,6 +387,10 @@ def request_workload(conn: 'connection',
                f'SET {C_CHK_OUT} = 1, {C_LAST_MODIF} = NOW() ' \
                f'WHERE {C_CPSO_NO} IN ({in_str})'
         curs.execute(stmt)
+
+        stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
+               f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
+        curs.executemany(stmt, tuple([(x,) for x in new_list]))
 
     else:
         stmt = 'SELECT d.CPSO_no, floor(RAND() * 10000000) r ' \
@@ -638,7 +661,12 @@ if __name__ == '__main__':
         print(f"Error connecting to MariaDB Platform: {e}")
         sys.exit(1)
 
-    request_workload(connect_db, random=False)
+    workload = request_workload(connect_db, random=False,
+                                batch_size=20)
+    workload = request_workload(connect_db, random=False,
+                                batch_size=20)
+    workload = request_workload(connect_db, random=False,
+                                batch_size=20)
     curs = connect_db.cursor()
     # for cpso_no in range(108493,150000): # TEST_CPSO:
     for cpso_no in TEST_CPSO:
