@@ -312,7 +312,87 @@ def print_rec(rec: dict, fields: tuple) -> str:
     return s
 
 
-def process_record(conn: 'connection', cur_CPSO: int) -> list:
+def request_workload(conn: 'connection',
+                     batch_size=1000,
+                     random=True,
+                     interval=20,
+                     min_val=10000,
+                     max_val=150000,
+                     desc=False) -> tuple:
+    curs = conn.cursor()
+    stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
+           f'VALUES ({batch_size}, user())'
+    curs.execute(stmt)
+    batch_id = curs.lastrowid
+    src_list = []
+    if not random:
+
+        # GET LIST OF CPSO NUMBERS
+        # create simple range first
+        src_list = [x for x in range(min_val, max_val)]
+        if desc:
+            src_list.reverse()
+
+        src_list = src_list[:batch_size]
+
+        # CHECK IF SOME NUMBERS NOT IN DB (?NEW)
+        stmt = f'SELECT COUNT(*) ' \
+               f'FROM {MD_DIR_TABLE} ' \
+               f'WHERE {C_CPSO_NO} = ?'
+
+        new_list = ()
+        for cur_val in src_list:
+            curs.execute(stmt, (cur_val,))
+            for (cnt,) in curs:
+                pass
+            if cnt == 0:
+                new_list += (cur_val,)
+
+        in_str = ', '.join([str(x) for x in src_list])
+
+        # GET LIST OF AVAILABLE NUMBERS FORM DATABASE
+        stmt = f'SELECT {C_CPSO_NO} ' \
+               f'FROM {MD_DIR_TABLE} ' \
+               f'WHERE {C_CPSO_NO} ' \
+               f'BETWEEN {src_list[0]} AND {src_list[-1]} AND (' \
+               f'{C_LAST_MODIF} < NOW() - INTERVAL {interval} DAY ' \
+               f'OR {C_FORCE_UPD})'
+
+        curs.execute(stmt)
+
+        new_list += tuple([x for (x,) in curs])
+
+        in_str = ', '.join([str(x) for x in new_list])
+
+        stmt = f'UPDATE {MD_DIR_TABLE} ' \
+               f'SET {C_CHK_OUT} = 1, {C_LAST_MODIF} = NOW() ' \
+               f'WHERE {C_CPSO_NO} IN ({in_str})'
+        curs.execute(stmt)
+
+    else:
+        stmt = 'SELECT d.CPSO_no, floor(RAND() * 10000000) r ' \
+               f'FROM {MD_ADDR_TABLE} d ' \
+               f'LEFT JOIN {BATCH_DET_TBL} ' \
+               f'bd ON d.CPSO_no = bd.cpso_no ' \
+               f'LEFT JOIN {BATCH_HEAD_TBL} bh ' \
+               f'ON bd.batch_uno = bh.batch_uno ' \
+               f'WHERE (bd.cpso_no IS NULL ' \
+               f'OR	(' \
+               f'bh.isCompleted AND ' \
+               f'bh.start_date < CURDATE() - ' \
+               f'INTERVAL {interval} DAY' \
+               f')) ' \
+               f'AND d.CPSO_no between {min_val} and {max_val}' \
+               f'ORDER BY r ' \
+               f'LIMIT {batch_size}'
+
+    if curs.rowcount == 0:
+        new_list = ()
+
+    return new_list
+
+
+def process_record(conn: 'connection', cur_CPSO: int, batch_id=0) -> list:
     db_statuses = refresh_ref_from_db(conn, REG_STAT_TABLE,
                                       C_REG_STAT_CODE,
                                       C_REG_STAT_NAME)
@@ -537,6 +617,9 @@ def process_record(conn: 'connection', cur_CPSO: int) -> list:
                                  C_ADDR_PROV, C_ADDR_POSTAL,
                                  C_ADDR_COUNTRY,
                                  C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
+    else:
+        print(f'({batch_id}) CPSO: {cur_CPSO} - cannot obtain. '
+              f'Response: {response.status_code}')
     return [record]
 
 
@@ -555,6 +638,7 @@ if __name__ == '__main__':
         print(f"Error connecting to MariaDB Platform: {e}")
         sys.exit(1)
 
+    request_workload(connect_db, random=False)
     curs = connect_db.cursor()
     # for cpso_no in range(108493,150000): # TEST_CPSO:
     for cpso_no in TEST_CPSO:

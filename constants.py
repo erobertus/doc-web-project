@@ -26,6 +26,10 @@ C_FNAME = 'first_name'
 C_LNAME = 'last_name'
 C_MNAME = 'middle_name'
 C_CPSO_NO = 'CPSO_no'
+C_CHK_OUT = 'is_checked_out'
+C_LAST_MODIF = 'last_modified'
+C_FORCE_UPD = 'force_update'
+
 REG_STAT_TABLE = 'z847e_MD_reg_statuses'
 C_REG_STAT_CODE = 'reg_stat_code'
 C_REG_STAT_NAME = 'reg_stat_name'
@@ -132,6 +136,9 @@ T_KEY = 'key'
 T_VAL = 'val'
 T_FKEY = 'fkey'
 
+BATCH_HEAD_TBL = 'MD_batch_header'
+BATCH_DET_TBL = 'MD_batch_details'
+
 DB_SCHEMA = {SPEC_TABLE: {T_KEY: C_SPEC_CODE},
              STYPE_TABLE: {T_KEY: C_STYPE_CODE,
                            T_VAL: C_STYPE_NAME},
@@ -148,6 +155,7 @@ TEST_CPSO = (10310, 102166,
              102165, 84993, 85144, 85179, 85950, 87827, 87890, 90572,
              100175, 70129, 110259, 110260, 70130, 108493,
              101169, 101170, 101079, 101080, 100326,
+             150001, 150002, 150003, 150004,
              100248, 70079, 100249, 100174, 100023, 10022,
              94129, 115098, 10065, 22278, 110310, 82099, 86495)
 
