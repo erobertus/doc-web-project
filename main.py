@@ -318,14 +318,12 @@ def request_workload(conn: 'connection',
                      interval=20,
                      min_val=10000,
                      max_val=150000,
-                     desc=False,
-                     fill_gaps=True) -> tuple:
+                     desc=False) -> tuple:
     curs = conn.cursor()
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
     curs.execute(stmt)
     batch_id = curs.lastrowid
-    src_list = []
 
     # make list
     if not random:
@@ -335,87 +333,64 @@ def request_workload(conn: 'connection',
         src_list = [x for x in range(min_val, max_val)]
         if desc:
             src_list.reverse()
-
-        stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
-               'WHERE (isCompleted AND ' \
-               'updated_date_time < NOW() - INTERVAL ' \
-               f'{interval} DAY) ' \
-               'OR (NOT isCompleted AND ' \
-               f'updated_date_time >= NOW()-INTERVAL {interval} DAY)'
-
-        curs.execute(stmt)
-
-        for cpso_no in curs
-            if cpso_no in src_list
-                src_list.remove(cpso_no)
-
-        src_list = src_list[:batch_size]
-
-
-
-        if fill_gaps:
-            # CHECK IF SOME NUMBERS NOT IN DB (?NEW)
-            stmt = f'SELECT COUNT(*) ' \
-                   f'FROM {MD_DIR_TABLE} ' \
-                   f'WHERE {C_CPSO_NO} = ?'
-
-            new_list = ()
-            for cur_val in src_list:
-                curs.execute(stmt, (cur_val,))
-                for (cnt,) in curs:
-                    pass
-                if cnt == 0:
-                    new_list += (cur_val,)
-
-        in_str = ', '.join([str(x) for x in src_list])
-
-        # GET LIST OF AVAILABLE NUMBERS FROM DATABASE
-        stmt = f'SELECT {C_CPSO_NO} ' \
-               f'FROM {MD_DIR_TABLE} ' \
-               f'WHERE {C_CPSO_NO} ' \
-               f'BETWEEN {src_list[0]} AND {src_list[-1]} AND (' \
-               f'{C_LAST_MODIF} < NOW() - INTERVAL {interval} DAY ' \
-               f'OR {C_FORCE_UPD})'
-
-        curs.execute(stmt)
-
-        new_list += tuple([x for (x,) in curs])
-
-        in_str = ', '.join([str(x) for x in new_list])
-
-        stmt = f'UPDATE {MD_DIR_TABLE} ' \
-               f'SET {C_CHK_OUT} = 1, {C_LAST_MODIF} = NOW() ' \
-               f'WHERE {C_CPSO_NO} IN ({in_str})'
-        curs.execute(stmt)
-
-        stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
-               f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
-        curs.executemany(stmt, tuple([(x,) for x in new_list]))
-
     else:
         stmt = 'SELECT d.CPSO_no, floor(RAND() * 10000000) r ' \
-               f'FROM {MD_ADDR_TABLE} d ' \
-               f'LEFT JOIN {BATCH_DET_TBL} ' \
-               f'bd ON d.CPSO_no = bd.cpso_no ' \
-               f'LEFT JOIN {BATCH_HEAD_TBL} bh ' \
-               f'ON bd.batch_uno = bh.batch_uno ' \
-               f'WHERE (bd.cpso_no IS NULL ' \
-               f'OR	(' \
-               f'bh.isCompleted AND ' \
-               f'bh.start_date < CURDATE() - ' \
-               f'INTERVAL {interval} DAY' \
-               f')) ' \
-               f'AND d.CPSO_no between {min_val} and {max_val}' \
-               f'ORDER BY r ' \
-               f'LIMIT {batch_size}'
+               f'FROM {MD_DIR_TABLE} d ' \
+               f'WHERE d.CPSO_no between {min_val} and {max_val} ' \
+               'ORDER BY r ' \
 
-    if curs.rowcount == 0:
-        new_list = ()
+        curs.execute(stmt)
 
-    return new_list
+        src_list = [cpso_no for (cpso_no, order) in curs]
+
+    stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
+           'WHERE (isCompleted AND ' \
+           'updated_date_time < NOW() - INTERVAL ' \
+           f'{interval} DAY) ' \
+           'OR (NOT isCompleted AND ' \
+           f'updated_date_time >= NOW()-INTERVAL {interval} DAY) ' \
+           f'OR PermExcluded ' \
+           f'ORDER BY {C_CPSO_NO}'
+
+    curs.execute(stmt)
+
+    for (cpso_no,) in curs:
+        if cpso_no in src_list:
+            src_list.remove(cpso_no)
+
+    src_list = src_list[:batch_size]
+
+    stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
+           f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
+    curs.executemany(stmt, [(x,) for x in src_list])
+    conn.commit()
+
+    return (batch_id, tuple(src_list))
 
 
-def process_record(conn: 'connection', cur_CPSO: int, batch_id=0) -> list:
+def update_detail_table(conn: 'connection',
+                   cpso_no: int, perm_exclude=False,
+                   batch_id=0):
+
+    curs = conn.cursor()
+    stmt = f'UPDATE {BATCH_DET_TBL} ' \
+           'SET isCompleted=1, ' \
+           'updated_date_time = now()' \
+
+    if perm_exclude:
+        stmt += ', PermExcluded = 1'
+
+    stmt += f' WHERE {C_CPSO_NO} = ? AND NOT isCompleted'
+
+    if batch_id != 0:
+        stmt += f' AND batch_uno = {batch_id}'
+    curs.execute(stmt, (cpso_no,))
+    conn.commit()
+
+
+def process_record(conn: 'connection', cur_CPSO: int,
+                   batch_id=0,
+                   exclude_invalid=True) -> list:
     db_statuses = refresh_ref_from_db(conn, REG_STAT_TABLE,
                                       C_REG_STAT_CODE,
                                       C_REG_STAT_NAME)
@@ -631,7 +606,8 @@ def process_record(conn: 'connection', cur_CPSO: int, batch_id=0) -> list:
         update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
                        C_LANG_CODE, record[MD_LANG_TABLE])
 
-        print(print_rec(record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
+        print(f'({batch_id}) ',
+              print_rec(record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
                                  C_ADDR_PREFIX + '1',
                                  C_ADDR_PREFIX + '2',
                                  C_ADDR_PREFIX + '3',
@@ -640,9 +616,15 @@ def process_record(conn: 'connection', cur_CPSO: int, batch_id=0) -> list:
                                  C_ADDR_PROV, C_ADDR_POSTAL,
                                  C_ADDR_COUNTRY,
                                  C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
+        update_detail_table(conn, cur_CPSO, batch_id=batch_id)
     else:
         print(f'({batch_id}) CPSO: {cur_CPSO} - cannot obtain. '
               f'Response: {response.status_code}')
+
+        if exclude_invalid:
+            update_detail_table(conn, cur_CPSO,
+                           batch_id=batch_id,
+                           perm_exclude=True)
     return [record]
 
 
@@ -661,21 +643,31 @@ if __name__ == '__main__':
         print(f"Error connecting to MariaDB Platform: {e}")
         sys.exit(1)
 
-    workload = request_workload(connect_db, random=False,
-                                batch_size=20)
-    workload = request_workload(connect_db, random=False,
-                                batch_size=20)
-    workload = request_workload(connect_db, random=False,
-                                batch_size=20)
+
     curs = connect_db.cursor()
     # for cpso_no in range(108493,150000): # TEST_CPSO:
-    for cpso_no in TEST_CPSO:
-        all_recs = process_record(connect_db, cpso_no)
-        update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
 
-        for s in FINAL_SQL:
-            curs.execute(s, (cpso_no,))
+    workload = request_workload(connect_db, random=False,
+                                batch_size=20,
+                                min_val=CPSO_START, max_val=CPSO_STOP)
 
-        connect_db.commit()
+    while len(workload[1]) > 0:
+
+        batch_no = workload[0]
+
+        for cpso_no in workload[1]:
+            all_recs = process_record(connect_db, cpso_no,
+                                      batch_id=batch_no)
+            update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
+
+            for s in FINAL_SQL:
+                curs.execute(s, (cpso_no,))
+
+            connect_db.commit()
+
+        workload = request_workload(connect_db, random=False,
+                                    batch_size=20,
+                                    min_val=CPSO_START,
+                                    max_val=CPSO_STOP)
 
     connect_db.close()

@@ -119,7 +119,7 @@ PREFIX = 'pre'
 SUFFIX = 'post'
 LABEL = 'label'
 
-PRES_MAP = {C_CPSO_NO: {LABEL: 'CPSO ', SUFFIX: ':'},
+PRES_MAP = {C_CPSO_NO: {LABEL: 'CPSO: ', SUFFIX: ':'},
             C_LNAME: {LABEL: 'Name: ', SUFFIX: ','},
             C_ADDR_PREFIX + '1': {LABEL: '\n   Address: '},
             C_ADDR_PREFIX + '2': {PREFIX: ', '},
@@ -158,6 +158,9 @@ TEST_CPSO = (10310, 102166,
              150001, 150002, 150003, 150004,
              100248, 70079, 100249, 100174, 100023, 10022,
              94129, 115098, 10065, 22278, 110310, 82099, 86495)
+
+CPSO_START = 10000
+CPSO_STOP = 150000
 
 FINAL_SQL = ["UPDATE MD_addresses "
              "SET phone_no_clean = "
