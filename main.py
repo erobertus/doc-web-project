@@ -328,7 +328,7 @@ def request_workload(conn: 'connection',
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
-    curs.execute(BEGIN_TRAN)
+    curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
     curs.execute(stmt)
@@ -370,7 +370,7 @@ def request_workload(conn: 'connection',
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
            f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
     curs.executemany(stmt, tuple([(x,) for x in src_list]))
-    curs.execute(COMMIT_TRAN)
+    conn.commit()
     conn.autocommit = save_commit_state
     return (batch_id, tuple(src_list))
 
