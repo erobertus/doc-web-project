@@ -6,6 +6,7 @@ import mechanicalsoup as ms
 import re
 import mariadb
 import googlemaps
+import time
 from constants import *
 
 
@@ -534,12 +535,22 @@ def process_record(conn: 'connection', cur_CPSO: int,
     browser = ms.StatefulBrowser(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0')
     url = 'https://doctors.cpso.on.ca/?search=general'
 
-    browser.open(url)
-    # page_html = page.soup
-    # form = browser.select_form('form[action="/?search=general"]')
-    form = browser.select_form()
-    form[ALL_DR_SEARCH_CHECKMARK] = True
-    form[CPSONO_FIELD] = cur_CPSO
+    tryagain = True
+
+    while tryagain:
+        try:
+            browser.open(url)
+            # page_html = page.soup
+            # form = browser.select_form('form[action="/?search=general"]')
+            form = browser.select_form()
+            form[ALL_DR_SEARCH_CHECKMARK] = True
+            form[CPSONO_FIELD] = cur_CPSO
+            tryagain = False
+        except:
+            print('Something wrong with the form... Waiting for 30 sec')
+            browser.launch_browser()
+            time.sleep(30)
+            tryagain = True
     response = browser.submit_selected()
     record = {C_CPSO_NO: cur_CPSO}
     page = response.soup
