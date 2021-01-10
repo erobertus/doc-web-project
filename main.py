@@ -328,7 +328,7 @@ def request_workload(conn: 'connection',
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
-    curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
+    # curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     curs.execute(BEGIN_TRAN)
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
@@ -358,7 +358,7 @@ def request_workload(conn: 'connection',
            'AND updated_date_time > (NOW() - INTERVAL ' \
            f'{interval} DAY) ' \
            f'OR PermExcluded ' \
-           f'ORDER BY {C_CPSO_NO}'
+           f'ORDER BY {C_CPSO_NO} FOR UPDATE'
 
     curs.execute(stmt)
 
