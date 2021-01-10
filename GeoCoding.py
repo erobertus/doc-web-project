@@ -13,6 +13,13 @@ CONST_SQL = 'SELECT CPSO_no, row_uno, address_1, ' \
             'AND address_1 <> "Practice Address Not Available"'
 API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
 
+
+def get_geocode(in_addr: str):
+    pass
+
+
+
+
 if __name__ == '__main__':
     gmaps = googlemaps.Client(key=API_KEY)
     # Connect to MariaDB Platform
@@ -45,6 +52,10 @@ if __name__ == '__main__':
          country) in curs:
         s = f'{address_1} {address_2} {address_3} {address_4}, {city} ' \
             f'{prov_code}  {postal_code}, {country}'
+
+        s = 'Postgraduate Medical Education Queen\'s University, 70 ' \
+            'Barrie Street, Kingston, ON  K7L 3N6'
+
         print(s)
 
         # Geocoding an address

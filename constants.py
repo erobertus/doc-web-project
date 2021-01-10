@@ -6,6 +6,7 @@ CPSONO_FIELD = "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
                "AllDoctorsSearch$txtCPSONumberGeneral"
 DELIM_COMMA = ','
 BLANK = ''
+ALL = 'all'
 DIV = 'div'
 SECT = 'section'
 CL_DR_INFO = 'doctor-info'
@@ -83,6 +84,8 @@ C_ADDR_EXT = 'ext_no'
 C_ADDR_FAX_NO = 'fax_no'
 C_ADDR_COUNTY = 'county'
 C_ADDR_IS_DEF = 'isDefault'
+C_ADDR_UNO = 'row_uno'
+NO_ADDR = 'Practice Address Not Available'
 
 POSTAL_SEPARATOR = '\xa0'
 PHONE_TAG = 'Phone:'
@@ -132,9 +135,23 @@ PRES_MAP = {C_CPSO_NO: {LABEL: 'CPSO: ', SUFFIX: ':'},
             C_ADDR_FAX_NO: {PREFIX: ', Fax: '}
             }
 
+ADDR_MAP = {C_CPSO_NO: {LABEL: 'CPSO: ', SUFFIX: ':'},
+            C_LNAME: {LABEL: 'Name: ', SUFFIX: ','},
+            C_ADDR_PREFIX + '2': {PREFIX: ', '},
+            C_ADDR_PREFIX + '3': {PREFIX: ', '},
+            C_ADDR_PREFIX + '4': {PREFIX: ', '},
+            C_ADDR_CITY: {PREFIX: ', '},
+            C_ADDR_POSTAL: {PREFIX: '  ', SUFFIX: ','},
+            C_FRMR_NAME: {PREFIX: ' A.K.A.: '},
+            C_ADDR_PHONE_NO: {PREFIX: ', Phone: '},
+            C_ADDR_FAX_NO: {PREFIX: ', Fax: '}
+            }
+
+
 T_KEY = 'key'
 T_VAL = 'val'
 T_FKEY = 'fkey'
+T_OWNKEY = 'ownkey'
 
 BATCH_HEAD_TBL = 'MD_batch_header'
 BATCH_DET_TBL = 'MD_batch_details'
@@ -146,7 +163,8 @@ DB_SCHEMA = {SPEC_TABLE: {T_KEY: C_SPEC_CODE},
              MD_DIR_TABLE: {T_KEY: C_CPSO_NO},
              MD_LANG_TABLE: {T_KEY: C_CPSO_NO, T_VAL: C_LANG_CODE},
              MD_HOSP_TABLE: {T_KEY: C_CPSO_NO, T_VAL: C_HOSP_CODE},
-             MD_ADDR_TABLE: {T_KEY: C_CPSO_NO, T_FKEY: C_DEF_ADDR},
+             MD_ADDR_TABLE: {T_KEY: C_CPSO_NO, T_FKEY: C_DEF_ADDR,
+                             T_OWNKEY: C_ADDR_UNO},
              MD_SPEC_TABLE: {T_KEY: C_CPSO_NO},
              MD_REG_JURISDIC: {T_KEY: C_CPSO_NO, T_VAL: C_JUR_CODE}
              }
@@ -159,8 +177,13 @@ TEST_CPSO = (10310, 102166,
              100248, 70079, 100249, 100174, 100023, 10022,
              94129, 115098, 10065, 22278, 110310, 82099, 86495)
 
-CPSO_START = 10000
+CPSO_START = 80000
 CPSO_STOP = 150000
+
+API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
+
+GEO_TABLE = 'MD_geo_pos'
+ADDR_X_GEO_TABLE = 'MD_addr_x_geo'
 
 FINAL_SQL = ["UPDATE MD_addresses "
              "SET phone_no_clean = "

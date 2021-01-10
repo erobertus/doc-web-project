@@ -5,6 +5,7 @@ import sys
 import mechanicalsoup as ms
 import re
 import mariadb
+import googlemaps
 from constants import *
 
 
@@ -249,7 +250,9 @@ def update_record(in_db: 'connection', records: list,
                     if type(c_val[0]) == dict:
                         fkey_val = update_record(in_db, c_val,
                                                  c_name, key_val)
-                        if T_FKEY in DB_SCHEMA[c_name].keys():
+                        key_list = DB_SCHEMA[c_name].keys()
+
+                        if T_FKEY in key_list:
                             cur_rec[DB_SCHEMA[c_name][T_FKEY]] = \
                                 fkey_val
                     else:
@@ -268,6 +271,9 @@ def update_record(in_db: 'connection', records: list,
                    f'VALUES({val_str})'
             try:
                 curs.execute(stmt, tuple(cur_rec.values()))
+                if T_OWNKEY in DB_SCHEMA[table].keys():
+                    record[DB_SCHEMA[table][T_OWNKEY]] = \
+                        curs.lastrowid
                 if iteration == 1:
                     result = curs.lastrowid
             except mariadb.Error as e:
@@ -294,18 +300,18 @@ def walk_data(d, fields: tuple) -> list:
     return li
 
 
-def print_rec(rec: dict, fields: tuple) -> str:
+def print_rec(rec: dict, fields: tuple, map=PRES_MAP) -> str:
     l = walk_data(rec, fields)
     s = ''
     for (i, (k, v)) in enumerate(l):
-        if k in PRES_MAP:
-            if LABEL in PRES_MAP[k]:
-                s += PRES_MAP[k][LABEL]
-            if PREFIX in PRES_MAP[k]:
-                s = s.rstrip() +  PRES_MAP[k][PREFIX]
+        if k in map:
+            if LABEL in map[k]:
+                s += map[k][LABEL]
+            if PREFIX in map[k]:
+                s = s.rstrip() + map[k][PREFIX]
             s += v
-            if SUFFIX in PRES_MAP[k]:
-                s += PRES_MAP[k][SUFFIX]
+            if SUFFIX in map[k]:
+                s += map[k][SUFFIX]
         else:
             s += v
         s += ' '
@@ -344,12 +350,13 @@ def request_workload(conn: 'connection',
         src_list = [cpso_no for (cpso_no, order) in curs]
 
     stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
-           'WHERE (isCompleted AND ' \
-           'updated_date_time < NOW() - INTERVAL ' \
+           f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
+           'AND ((isCompleted AND ' \
+           'updated_date_time > NOW() - INTERVAL ' \
            f'{interval} DAY) ' \
            'OR (NOT isCompleted AND ' \
-           f'updated_date_time >= NOW()-INTERVAL {interval} DAY) ' \
-           f'OR PermExcluded ' \
+           f'updated_date_time <= NOW()-INTERVAL {interval} DAY) ' \
+           f'OR PermExcluded) ' \
            f'ORDER BY {C_CPSO_NO}'
 
     curs.execute(stmt)
@@ -387,6 +394,84 @@ def update_detail_table(conn: 'connection',
     curs.execute(stmt, (cpso_no,))
     conn.commit()
 
+
+def link_geocode(conn_db: 'connection', record: list,
+                 incl_prov=(ALL,), incl_cntry=(ALL,)):
+    ADDR_COMPONENTS = 'address_components'
+    STR_NO = 'street_number'
+    TYPES = 'types'
+    LONG_NAME = 'long_name'
+    SHORT_NAME = 'short_name'
+    STR_NAME = 'route'
+    CITY_NAME = 'locality'
+    COUNTY_NAME = 'administrative_area_level_2'
+    PROV_NAME = 'administrative_area_level_1'
+    COUNTRY_NAME = 'country'
+    POSTAL_NAME = 'postal_code'
+    GEOM = 'geometry'
+    LOC = 'location'
+    LAT = 'lat'
+    LNG = 'lng'
+
+    curs = conn_db.cursor()
+    gmaps = googlemaps.Client(key=API_KEY)
+    for cur_addr in record[MD_ADDR_TABLE]:
+        # get if postal already stored
+        stmt = f'SELECT geo_uno `cnt` FROM {GEO_TABLE} ' \
+               f'WHERE postal_code = ? and country = ?'
+        curs.execute(stmt,
+                     (cur_addr[C_ADDR_POSTAL],
+                      cur_addr[C_ADDR_COUNTRY]))
+
+        if curs.rowcount > 0:
+            geo_unos = [x for (x,) in curs]
+
+
+
+
+        do_geocode = (ALL in incl_prov or
+                      cur_addr[C_ADDR_PROV] in incl_prov) and \
+                     (ALL in incl_cntry or
+                      cur_addr[C_ADDR_COUNTRY] in incl_cntry)
+
+        if cur_addr[C_ADDR_PREFIX+'1'] != NO_ADDR and do_geocode:
+            addr = print_rec(cur_addr, (
+                               C_ADDR_PREFIX + '1',
+                               C_ADDR_PREFIX + '2',
+                               C_ADDR_PREFIX + '3',
+                               C_ADDR_PREFIX + '4',
+                               C_ADDR_CITY,
+                               C_ADDR_PROV, C_ADDR_POSTAL,
+                               C_ADDR_COUNTRY),
+                             map=ADDR_MAP)
+            geocode_result = gmaps.geocode(addr)
+
+            streets = []
+            for geocode in geocode_result:
+                for addr_part in geocode[ADDR_COMPONENTS]:
+                    for types in addr_part[TYPES]:
+                        if types == STR_NO:
+                            str_no = addr_part[SHORT_NAME]
+                        elif types == STR_NAME:
+                            streets.append(addr_part[SHORT_NAME])
+                        elif types == CITY_NAME:
+                            city = addr_part[SHORT_NAME]
+                        elif types == COUNTY_NAME:
+                            county = addr_part[SHORT_NAME]
+                        elif types == PROV_NAME:
+                            prov = addr_part[SHORT_NAME]
+                        elif types == COUNTRY_NAME:
+                            country = addr_part[LONG_NAME]
+                        elif types == POSTAL_NAME:
+                            postal = addr_part[SHORT_NAME]
+                for i in range(len(streets),4):
+                    streets.append(BLANK)
+                lat = geocode[GEOM][LOC][LAT]
+                lng = geocode[GEOM][LOC][LNG]
+
+    conn_db.commit()
+
+    pass
 
 def process_record(conn: 'connection', cur_CPSO: int,
                    batch_id=0,
@@ -564,8 +649,9 @@ def process_record(conn: 'connection', cur_CPSO: int,
                                                      C_SPEC_NAME)
                          }
             if i + 2 < len(cur_info):
-                spec_dict[C_SPEC_DATE] = \
-                    reformat_date(cur_info[i + 1].split(':')[1])
+                s = cur_info[i + 1].split(':')
+                if len(s) > 1:
+                    spec_dict[C_SPEC_DATE] = reformat_date(s[1])
                 spec_dict[C_STYPE_CODE] = retrieve_code_from_name(
                     cur_info[i + 2], db_spec_types, conn,
                     STYPE_TABLE, C_STYPE_CODE, C_STYPE_NAME
@@ -616,6 +702,8 @@ def process_record(conn: 'connection', cur_CPSO: int,
                                  C_ADDR_PROV, C_ADDR_POSTAL,
                                  C_ADDR_COUNTRY,
                                  C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
+#        link_geocode(conn, record, incl_prov=('ON',))
+
         update_detail_table(conn, cur_CPSO, batch_id=batch_id)
     else:
         print(f'({batch_id}) CPSO: {cur_CPSO} - cannot obtain. '
@@ -637,7 +725,8 @@ if __name__ == '__main__':
             password="NnBgmX$t^+tG",
             host="faxcomet.com",
             port=3306,
-            database="faxcomet_MD_list"
+            database="faxcomet_MD_list",
+            compress=True
         )
     except mariadb.Error as e:
         print(f"Error connecting to MariaDB Platform: {e}")
