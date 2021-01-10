@@ -328,6 +328,7 @@ def request_workload(conn: 'connection',
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
+    curs.execute(BEGIN_TRAN)
     curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
@@ -370,7 +371,8 @@ def request_workload(conn: 'connection',
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
            f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
     curs.executemany(stmt, tuple([(x,) for x in src_list]))
-    conn.commit()
+    curs.execute(COMMIT_TRAN)
+    # conn.commit()
     conn.autocommit = save_commit_state
     return (batch_id, tuple(src_list))
 
@@ -751,7 +753,7 @@ if __name__ == '__main__':
     # for cpso_no in range(108493,150000): # TEST_CPSO:
 
     workload = request_workload(connect_db, random=False,
-                                batch_size=20,
+                                batch_size=10,
                                 min_val=CPSO_START, max_val=CPSO_STOP)
 
     while len(workload[1]) > 0:
@@ -773,7 +775,7 @@ if __name__ == '__main__':
 
         finish_workload(connect_db, batch_no)
         workload = request_workload(connect_db, random=False,
-                                    batch_size=20,
+                                    batch_size=10,
                                     min_val=CPSO_START,
                                     max_val=CPSO_STOP)
 
