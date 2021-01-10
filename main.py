@@ -354,10 +354,10 @@ def request_workload(conn: 'connection',
     stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
            f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
            'AND ((isCompleted AND ' \
-           'updated_date_time > NOW() - INTERVAL ' \
+           'updated_date_time < NOW() - INTERVAL ' \
            f'{interval} DAY) ' \
            'OR (NOT isCompleted AND ' \
-           f'updated_date_time <= NOW()-INTERVAL {interval} DAY) ' \
+           f'updated_date_time >= NOW()-INTERVAL {interval} DAY) ' \
            f'OR PermExcluded) ' \
            f'ORDER BY {C_CPSO_NO}'
 
