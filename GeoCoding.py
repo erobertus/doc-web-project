@@ -18,6 +18,81 @@ def get_geocode(in_addr: str):
     pass
 
 
+def link_geocode_all(conn_db: 'connection', record: list,
+                 incl_prov=(ALL,), incl_cntry=(ALL,)):
+    ADDR_COMPONENTS = 'address_components'
+    STR_NO = 'street_number'
+    TYPES = 'types'
+    LONG_NAME = 'long_name'
+    SHORT_NAME = 'short_name'
+    STR_NAME = 'route'
+    CITY_NAME = 'locality'
+    COUNTY_NAME = 'administrative_area_level_2'
+    PROV_NAME = 'administrative_area_level_1'
+    COUNTRY_NAME = 'country'
+    POSTAL_NAME = 'postal_code'
+    GEOM = 'geometry'
+    LOC = 'location'
+    LAT = 'lat'
+    LNG = 'lng'
+
+    curs = conn_db.cursor()
+    gmaps = googlemaps.Client(key=API_KEY)
+    for cur_addr in record[MD_ADDR_TABLE]:
+        # get if postal already stored
+        stmt = f'SELECT geo_uno `cnt` FROM {GEO_TABLE} ' \
+               f'WHERE postal_code = ? and country = ?'
+        curs.execute(stmt,
+                     (cur_addr[C_ADDR_POSTAL],
+                      cur_addr[C_ADDR_COUNTRY]))
+
+        if curs.rowcount > 0:
+            geo_unos = [x for (x,) in curs]
+
+
+
+
+        do_geocode = (ALL in incl_prov or
+                      cur_addr[C_ADDR_PROV] in incl_prov) and \
+                     (ALL in incl_cntry or
+                      cur_addr[C_ADDR_COUNTRY] in incl_cntry)
+
+        if cur_addr[C_ADDR_PREFIX+'1'] != NO_ADDR and do_geocode:
+            addr = print_rec(cur_addr, (
+                               C_ADDR_PREFIX + '1',
+                               C_ADDR_PREFIX + '2',
+                               C_ADDR_PREFIX + '3',
+                               C_ADDR_PREFIX + '4',
+                               C_ADDR_CITY,
+                               C_ADDR_PROV, C_ADDR_POSTAL,
+                               C_ADDR_COUNTRY),
+                             map=ADDR_MAP)
+            geocode_result = gmaps.geocode(addr)
+
+            streets = []
+            for geocode in geocode_result:
+                for addr_part in geocode[ADDR_COMPONENTS]:
+                    for types in addr_part[TYPES]:
+                        if types == STR_NO:
+                            str_no = addr_part[SHORT_NAME]
+                        elif types == STR_NAME:
+                            streets.append(addr_part[SHORT_NAME])
+                        elif types == CITY_NAME:
+                            city = addr_part[SHORT_NAME]
+                        elif types == COUNTY_NAME:
+                            county = addr_part[SHORT_NAME]
+                        elif types == PROV_NAME:
+                            prov = addr_part[SHORT_NAME]
+                        elif types == COUNTRY_NAME:
+                            country = addr_part[LONG_NAME]
+                        elif types == POSTAL_NAME:
+                            postal = addr_part[SHORT_NAME]
+                for i in range(len(streets),4):
+                    streets.append(BLANK)
+                lat = geocode[GEOM][LOC][LAT]
+                lng = geocode[GEOM][LOC][LNG]
+
+    conn_db.commit()
 
 
 if __name__ == '__main__':

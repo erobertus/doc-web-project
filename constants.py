@@ -10,6 +10,7 @@ ALL = 'all'
 DIV = 'div'
 BEGIN_TRAN = 'START TRANSACTION'
 COMMIT_TRAN = 'COMMIT'
+ABORT_ALL = '!!!ABORT_ALL'
 SECT = 'section'
 CL_DR_INFO = 'doctor-info'
 CL_INFO = 'info'
@@ -113,6 +114,7 @@ C_HOSP_CODE = 'hosp_code'
 C_HOSP_NAME = 'hosp_name'
 
 WEB_NO_HOSP = 'No Privileges reported.'
+WEB_HOSP_NOTICES = 'Hospital Notices'
 MD_HOSP_TABLE = 'z847e_MD_doc_x_hosp'
 
 WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,

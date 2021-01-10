@@ -346,6 +346,16 @@ def request_workload(conn: 'connection',
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
+
+    stmt = f'SELECT COUNT(*) FROM {BATCH_HEAD_TBL} ' \
+           f'WHERE host = "{ABORT_ALL}" and batch_size < 0'
+    curs.execute(stmt)
+    for (is_abort,) in curs:
+        pass
+    if is_abort:
+        print('Halt requested. Aborting...')
+        return (0, tuple())
+
     # curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     curs.execute(BEGIN_TRAN)
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
@@ -373,9 +383,9 @@ def request_workload(conn: 'connection',
 
     stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
            f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
-           'AND updated_date_time > (NOW() - INTERVAL ' \
+           'AND (updated_date_time > (NOW() - INTERVAL ' \
            f'{interval} DAY) ' \
-           f'OR PermExcluded ' \
+           f'OR PermExcluded) ' \
            f'ORDER BY {C_CPSO_NO} FOR UPDATE'
 
     curs.execute(stmt)
@@ -392,7 +402,8 @@ def request_workload(conn: 'connection',
         if i > 0:
             stmt += DELIM_COMMA
         stmt += f'({batch_id}, {j}, NOW())'
-    curs.execute(stmt)
+    if len(src_list) > 0:
+        curs.execute(stmt)
     curs.execute(COMMIT_TRAN)
     # curs.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
 
@@ -732,7 +743,8 @@ def process_record(conn: 'connection', cur_CPSO: int,
                 ))
             else:
                 i = 3
-                while i < len(cur_info):
+                while i < len(cur_info) and \
+                        cur_info[i] != WEB_HOSP_NOTICES:
                     hosp_list.append(retrieve_code_from_name(
                         cur_info[i] + f' ({cur_info[i + 1]})',
                         db_hospitals, conn,
@@ -790,7 +802,7 @@ if __name__ == '__main__':
 
     workload = request_workload(connect_db, random=False,
                                 batch_size=10,
-                                min_val=CPSO_START, max_val=CPSO_STOP)
+                                min_val=67382, max_val=67383)
 
     while len(workload[1]) > 0:
 
