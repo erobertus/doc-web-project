@@ -802,7 +802,7 @@ if __name__ == '__main__':
 
     workload = request_workload(connect_db, random=False,
                                 batch_size=10,
-                                min_val=67382, max_val=67383)
+                                min_val=CPSO_START, max_val=CPSO_STOP)
 
     while len(workload[1]) > 0:
 
