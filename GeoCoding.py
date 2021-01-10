@@ -49,31 +49,31 @@ def link_geocode_all(conn_db: 'connection',
     conn_db.autocommit = False
 
     curs = conn_db.cursor()
-    curs.execute(BEGIN_TRAN)
+
 
     gmaps = googlemaps.Client(key=API_KEY)
 
     curs.execute(CONST_SQL)
-    result_set = ((postal, cnt, addr, prov, cntry) for
-                  (postal, cnt, addr, prov, cntry) in curs)
-
+    result_set = [(postal, cnt, addr, prov, cntry) for
+                  (postal, cnt, addr, prov, cntry) in curs]
+    i = 1
+    j = len(result_set)
     for (postal, cnt, addr, prov, cntry) \
             in result_set:
+        print(f"({i}/{j}) Checking address: ", addr)
         # get if postal already stored
+        curs.execute(BEGIN_TRAN)
+        stmt = f'SELECT geo_uno FROM {GEO_TABLE} ' \
+               f'WHERE postal_code = ? and prov_code = ? ' \
+               f'and country = ? FOR UPDATE'
+        curs.execute(stmt, (postal, prov, cntry))
 
-        stmt = f'SELECT geo_uno `cnt` FROM {GEO_TABLE} ' \
-               f'WHERE postal_code = ? and country = ?'
-        curs.execute(stmt, (prov, cntry))
-
-        geo_unos = []
-        if curs.rowcount > 0:
-            geo_unos = [x for (x,) in curs]
-
+        geo_unos = [x for (x,) in curs]
 
         do_geocode = len(geo_unos) == 0
 
         if addr != NO_ADDR and do_geocode:
-
+            print("\t...not found, asking Google...", end='')
             geocode_result = gmaps.geocode(addr)
 
             g_streets = []
@@ -99,7 +99,7 @@ def link_geocode_all(conn_db: 'connection',
 
                 lat = geocode[GEOM][LOC][LAT]
                 lng = geocode[GEOM][LOC][LNG]
-
+                print(f' --> \t\t Lat: {lat}, Lng: {lng}')
                 # INSERT GEOCODE
                 stmt = f'INSERT INTO {GEO_TABLE} (\n' \
                        f'   lattitude, longitude, ' \
@@ -124,8 +124,25 @@ def link_geocode_all(conn_db: 'connection',
 
                 curs.execute(stmt, v)
                 geo_unos.append(curs.lastrowid)
+                print(f"\tGeo table {GEO_TABLE} updated with ID {curs.lastrowid}")
+        # GET LIST OF ADDRESS UNOS
 
-    curs.execute(COMMIT_TRAN)
+        print(f'...Updating link table {ADDR_X_GEO_TABLE}... ', end='')
+        stmt = f'INSERT INTO {ADDR_X_GEO_TABLE} (addr_uno, geo_uno)\n' \
+               'SELECT a.row_uno, gp.geo_uno\n' \
+               'FROM MD_geo_pos gp\n' \
+               '	JOIN MD_addresses a ' \
+               'ON gp.postal_code = a.postal_code\n' \
+               '	LEFT JOIN MD_addr_x_geo ag ' \
+               'ON a.row_uno = ag.addr_uno ' \
+               'AND gp.geo_uno = ag.geo_uno\n' \
+               'WHERE gp.postal_code = ?\n' \
+               '	AND ag.row_uno IS NULL'
+
+        curs.execute(stmt, (postal,))
+        print(f'{curs.rowcount} row(s) affected.')
+        curs.execute(COMMIT_TRAN)
+        i += 1
     # conn_db.commit()
     conn_db.autocommit = save_commit_state
 
