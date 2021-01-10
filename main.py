@@ -369,10 +369,14 @@ def request_workload(conn: 'connection',
     src_list = src_list[:batch_size]
 
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
-           f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
-    curs.executemany(stmt, tuple([(x,) for x in src_list]))
+           f'updated_date_time) VALUES '
+    for (i, j) in enumerate(src_list):
+        if i > 0:
+            stmt += DELIM_COMMA
+        stmt += f'({batch_id}, {j}, NOW())'
+    curs.execute(stmt)
     curs.execute(COMMIT_TRAN)
-    curs.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+    # curs.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
 
     # conn.commit()
     conn.autocommit = save_commit_state
