@@ -2,23 +2,32 @@ import googlemaps
 from datetime import datetime
 import mariadb
 from constants import *
-CONST_SQL = 'SELECT CPSO_no, row_uno, address_1, ' \
-            'COALESCE(address_2, "") as address_2, ' \
-            'COALESCE(address_3, "") as address_3, '\
-            'COALESCE(address_4, "") as address_4, city, prov_code, ' \
-            'postal_code, ' \
-            'postal_code_clean, '\
-            'country FROM MD_addresses ' \
-            'WHERE cpso_no BETWEEN 100100 AND 100125 ' \
-            'AND address_1 <> "Practice Address Not Available"'
-API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
+CONST_SQL = "SELECT a.postal_code, COUNT(*) `cnt`,	\n" \
+            "CONCAT(a.address_1,\n" \
+            "IF(COALESCE(a.address_2, '') <> '', " \
+            "CONCAT(', ', a.address_2), ''),\n" \
+            "IF(COALESCE(a.address_3, '') <> '', " \
+            "CONCAT(', ', a.address_3), ''),\n" \
+            "IF(COALESCE(a.address_4, '') <> '', " \
+            "CONCAT(', ', a.address_4), ''),\n" \
+            "', ', a.city, ' ', a.prov_code, '  ', " \
+            "a.postal_code, ', ', a.country\n" \
+            ") `full_address`, a.prov_code, a.country\n" \
+            "FROM MD_addresses a\n" \
+            "WHERE a.postal_code IS NOT NULL\n" \
+            "	AND a.prov_code = 'ON'\n" \
+            "	AND a.country = 'Canada'\n" \
+            "	AND a.address_1 <> 'Practice Address Not Available'\n" \
+            "GROUP BY a.postal_code_clean\n" \
+            "HAVING COUNT(*) > 4"
 
+API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
 
 def get_geocode(in_addr: str):
     pass
 
 
-def link_geocode_all(conn_db: 'connection', record: list,
+def link_geocode_all(conn_db: 'connection',
                  incl_prov=(ALL,), incl_cntry=(ALL,)):
     ADDR_COMPONENTS = 'address_components'
     STR_NO = 'street_number'
@@ -36,38 +45,28 @@ def link_geocode_all(conn_db: 'connection', record: list,
     LAT = 'lat'
     LNG = 'lng'
 
-    curs = conn_db.cursor()
+
+    outer_curs = conn_db.cursor()
     gmaps = googlemaps.Client(key=API_KEY)
-    for cur_addr in record[MD_ADDR_TABLE]:
+
+    outer_curs.execute(CONST_SQL)
+
+    for (postal_code, cnt, cur_addr, prov, cntry) in outer_curs:
         # get if postal already stored
+        curs = conn_db.cursor()
         stmt = f'SELECT geo_uno `cnt` FROM {GEO_TABLE} ' \
                f'WHERE postal_code = ? and country = ?'
-        curs.execute(stmt,
-                     (cur_addr[C_ADDR_POSTAL],
-                      cur_addr[C_ADDR_COUNTRY]))
+        curs.execute(stmt, (prov, cntry))
 
         if curs.rowcount > 0:
             geo_unos = [x for (x,) in curs]
 
 
+        do_geocode = len(geo_unos) > 0
 
+        if cur_addr != NO_ADDR and do_geocode:
 
-        do_geocode = (ALL in incl_prov or
-                      cur_addr[C_ADDR_PROV] in incl_prov) and \
-                     (ALL in incl_cntry or
-                      cur_addr[C_ADDR_COUNTRY] in incl_cntry)
-
-        if cur_addr[C_ADDR_PREFIX+'1'] != NO_ADDR and do_geocode:
-            addr = print_rec(cur_addr, (
-                               C_ADDR_PREFIX + '1',
-                               C_ADDR_PREFIX + '2',
-                               C_ADDR_PREFIX + '3',
-                               C_ADDR_PREFIX + '4',
-                               C_ADDR_CITY,
-                               C_ADDR_PROV, C_ADDR_POSTAL,
-                               C_ADDR_COUNTRY),
-                             map=ADDR_MAP)
-            geocode_result = gmaps.geocode(addr)
+            geocode_result = gmaps.geocode(cur_addr)
 
             streets = []
             for geocode in geocode_result:
@@ -91,7 +90,7 @@ def link_geocode_all(conn_db: 'connection', record: list,
                     streets.append(BLANK)
                 lat = geocode[GEOM][LOC][LAT]
                 lng = geocode[GEOM][LOC][LNG]
-
+        curs.close()
     conn_db.commit()
 
 
@@ -109,6 +108,10 @@ if __name__ == '__main__':
     except mariadb.Error as e:
         print(f"Error connecting to MariaDB Platform: {e}")
 
+    link_geocode_all(connect_db)
+
+
+    """
     stmt = "UPDATE MD_addresses SET lat = ?, lng = ?, " \
            "point_coordinates = " \
            'POINTFROMTEXT(CONCAT("POINT(", ?, " ", ?, ")")) ' \
@@ -151,6 +154,7 @@ if __name__ == '__main__':
 
     # connect_db.autocommit = save_commit_state
 
+    """
     connect_db.close()
 """
 gmaps = googlemaps.Client(key='AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4')

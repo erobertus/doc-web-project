@@ -777,6 +777,8 @@ def process_record(conn: 'connection', cur_CPSO: int,
             update_detail_table(conn, cur_CPSO,
                            batch_id=batch_id,
                            perm_exclude=True)
+
+    browser.close()
     return [record]
 
 
