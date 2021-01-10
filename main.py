@@ -234,9 +234,10 @@ def update_x_table(in_db: 'connection', table: str,
             tryagain = False
         except mariadb.OperationalError as e:
             print(f'Error: {e}.')
+            print(f'Most recent statement: \n{stmt}')
             print(f'Attempt: {attempt}. '
                   f'Waiting {retry_delay} seconds to retry.')
-            time.wait(retry_delay)
+            time.sleep(retry_delay)
             tryagain = True
         except:
             raise
