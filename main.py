@@ -760,7 +760,7 @@ if __name__ == '__main__':
             connect_db.autocommit = save_commit_state
 
         workload = request_workload(connect_db, random=False,
-                                    batch_size=20,
+                                    batch_size=100,
                                     min_val=CPSO_START,
                                     max_val=CPSO_STOP)
 
