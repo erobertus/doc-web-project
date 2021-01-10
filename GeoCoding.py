@@ -45,53 +45,89 @@ def link_geocode_all(conn_db: 'connection',
     LAT = 'lat'
     LNG = 'lng'
 
+    save_commit_state = conn_db.autocommit
+    conn_db.autocommit = False
 
-    outer_curs = conn_db.cursor()
+    curs = conn_db.cursor()
+    curs.execute(BEGIN_TRAN)
+
     gmaps = googlemaps.Client(key=API_KEY)
 
-    outer_curs.execute(CONST_SQL)
+    curs.execute(CONST_SQL)
+    result_set = ((postal, cnt, addr, prov, cntry) for
+                  (postal, cnt, addr, prov, cntry) in curs)
 
-    for (postal_code, cnt, cur_addr, prov, cntry) in outer_curs:
+    for (postal, cnt, addr, prov, cntry) \
+            in result_set:
         # get if postal already stored
-        curs = conn_db.cursor()
+
         stmt = f'SELECT geo_uno `cnt` FROM {GEO_TABLE} ' \
                f'WHERE postal_code = ? and country = ?'
         curs.execute(stmt, (prov, cntry))
 
+        geo_unos = []
         if curs.rowcount > 0:
             geo_unos = [x for (x,) in curs]
 
 
-        do_geocode = len(geo_unos) > 0
+        do_geocode = len(geo_unos) == 0
 
-        if cur_addr != NO_ADDR and do_geocode:
+        if addr != NO_ADDR and do_geocode:
 
-            geocode_result = gmaps.geocode(cur_addr)
+            geocode_result = gmaps.geocode(addr)
 
-            streets = []
+            g_streets = []
             for geocode in geocode_result:
                 for addr_part in geocode[ADDR_COMPONENTS]:
                     for types in addr_part[TYPES]:
                         if types == STR_NO:
-                            str_no = addr_part[SHORT_NAME]
+                            g_str_no = addr_part[SHORT_NAME]
                         elif types == STR_NAME:
-                            streets.append(addr_part[SHORT_NAME])
+                            g_streets.append(addr_part[SHORT_NAME])
                         elif types == CITY_NAME:
-                            city = addr_part[SHORT_NAME]
+                            g_city = addr_part[SHORT_NAME]
                         elif types == COUNTY_NAME:
-                            county = addr_part[SHORT_NAME]
+                            g_county = addr_part[SHORT_NAME]
                         elif types == PROV_NAME:
-                            prov = addr_part[SHORT_NAME]
+                            g_prov = addr_part[SHORT_NAME]
                         elif types == COUNTRY_NAME:
-                            country = addr_part[LONG_NAME]
+                            g_country = addr_part[LONG_NAME]
                         elif types == POSTAL_NAME:
-                            postal = addr_part[SHORT_NAME]
-                for i in range(len(streets),4):
-                    streets.append(BLANK)
+                            g_postal = addr_part[SHORT_NAME]
+                for i in range(len(g_streets),4):
+                    g_streets.append(BLANK)
+
                 lat = geocode[GEOM][LOC][LAT]
                 lng = geocode[GEOM][LOC][LNG]
-        curs.close()
-    conn_db.commit()
+
+                # INSERT GEOCODE
+                stmt = f'INSERT INTO {GEO_TABLE} (\n' \
+                       f'   lattitude, longitude, ' \
+                       f'   geo_point, ' \
+                       f'   address_1, address_2, ' \
+                       f'address_3, address_4, \n' \
+                       f'   street_no, street_name, ' \
+                       f'city, prov_code, ' \
+                       f'   county, postal_code, ' \
+                       f'postal_code_clean, ' \
+                       f'   country)\n' \
+                       f'VALUES (\n' \
+                       f'   ?, ?, ' \
+                       'POINTFROMTEXT(' \
+                       'CONCAT("POINT(",?, " ", ?, ")")),' \
+                       f' ?, ?, ?, ?,\n' \
+                       f'   ?, ?, ?, ?, ?, ?, ?, ?)'
+                v = (lat, lng, str(lat), str(lng))
+                v += tuple([x for x in g_streets])
+                v += (g_str_no, g_streets[0], g_city, g_prov, g_county)
+                v += (g_postal, g_postal.replace(' ', ''), g_country)
+
+                curs.execute(stmt, v)
+                geo_unos.append(curs.lastrowid)
+
+    curs.execute(COMMIT_TRAN)
+    # conn_db.commit()
+    conn_db.autocommit = save_commit_state
 
 
 if __name__ == '__main__':
