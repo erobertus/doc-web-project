@@ -380,7 +380,8 @@ def request_workload(conn: 'connection',
 def update_detail_table(conn: 'connection',
                    cpso_no: int, perm_exclude=False,
                    batch_id=0):
-
+    save_commit_state = conn.autocommit
+    conn.autocommit = False
     curs = conn.cursor()
     stmt = f'UPDATE {BATCH_DET_TBL} ' \
            'SET isCompleted=1, ' \
@@ -394,6 +395,7 @@ def update_detail_table(conn: 'connection',
     if batch_id != 0:
         stmt += f' AND batch_uno = {batch_id}'
     curs.execute(stmt, (cpso_no,))
+    conn.autocommit = save_commit_state
     conn.commit()
 
 
