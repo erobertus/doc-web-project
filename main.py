@@ -325,6 +325,8 @@ def request_workload(conn: 'connection',
                      min_val=10000,
                      max_val=150000,
                      desc=False) -> tuple:
+    save_commit_state = conn.autocommit
+    conn.autocommit = False
     curs = conn.cursor()
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
@@ -371,7 +373,7 @@ def request_workload(conn: 'connection',
            f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
     curs.executemany(stmt, [(x,) for x in src_list])
     conn.commit()
-
+    conn.autocommit = save_commit_state
     return (batch_id, tuple(src_list))
 
 
@@ -749,10 +751,13 @@ if __name__ == '__main__':
                                       batch_id=batch_no)
             update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
 
+            save_commit_state = connect_db.autocommit
+            connect_db.autocommit = False
             for s in FINAL_SQL:
                 curs.execute(s, (cpso_no,))
 
             connect_db.commit()
+            connect_db.autocommit = save_commit_state
 
         workload = request_workload(connect_db, random=False,
                                     batch_size=20,
