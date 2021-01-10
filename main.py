@@ -328,8 +328,8 @@ def request_workload(conn: 'connection',
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
-    curs.execute(BEGIN_TRAN)
     curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
+    curs.execute(BEGIN_TRAN)
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
     curs.execute(stmt)
@@ -372,13 +372,16 @@ def request_workload(conn: 'connection',
            f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
     curs.executemany(stmt, tuple([(x,) for x in src_list]))
     curs.execute(COMMIT_TRAN)
+    curs.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+
     # conn.commit()
     conn.autocommit = save_commit_state
     return (batch_id, tuple(src_list))
 
 
 def finish_workload(conn: 'connection', batch_id):
-
+    save_commit_state = conn.autocommit
+    conn.autocommit = False
     curs = conn.cursor()
     s = f'UPDATE {BATCH_HEAD_TBL} SET Completed = 1, ' \
         f'InProgress = 0, end_date = now(),' \
@@ -386,7 +389,8 @@ def finish_workload(conn: 'connection', batch_id):
         f'WHERE batch_uno = ?'
 
     curs.execute(s, (batch_id,))
-    conn.commit
+    conn.commit()
+    conn.autocommit = save_commit_state
 
 
 def update_detail_table(conn: 'connection',
@@ -759,7 +763,6 @@ if __name__ == '__main__':
     while len(workload[1]) > 0:
 
         batch_no = workload[0]
-
         for cpso_no in workload[1]:
             all_recs = process_record(connect_db, cpso_no,
                                       batch_id=batch_no)
@@ -772,6 +775,7 @@ if __name__ == '__main__':
 
             connect_db.commit()
             connect_db.autocommit = save_commit_state
+
 
         finish_workload(connect_db, batch_no)
         workload = request_workload(connect_db, random=False,
