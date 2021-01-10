@@ -371,7 +371,7 @@ def request_workload(conn: 'connection',
 
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
            f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
-    curs.executemany(stmt, [(x,) for x in src_list])
+    curs.executemany(stmt, tuple([(x,) for x in src_list]))
     conn.commit()
     conn.autocommit = save_commit_state
     return (batch_id, tuple(src_list))
