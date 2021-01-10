@@ -197,33 +197,49 @@ def processs_address(source: 'ResultSet') -> list[dict]:
 
 def update_x_table(in_db: 'connection', table: str,
                    key_col: str, key: str,
-                   val_col: str, values: list):
+                   val_col: str, values: list,
+                   max_attempts=5, retry_delay=5):
     save_commit_state = in_db.autocommit
     in_db.autocommit = False
     curs = in_db.cursor()
 
     str_list = ', '.join([str(s) for s in values])
+    attempt = 1
+    tryagain = True
 
-    # DELETE VALUES NOT IN values
-    stmt = f'DELETE FROM {table} WHERE {key_col} = ? ' \
-           f'AND {val_col} NOT IN ({str_list})'
+    while attempt <= max_attempts and tryagain:
+        try:
+            curs.execute(BEGIN_TRAN)
 
-    curs.execute(stmt, (key,))
+            # DELETE VALUES NOT IN values
+            stmt = f'DELETE FROM {table} WHERE {key_col} = {key} ' \
+                   f'AND {val_col} NOT IN ({str_list})'
 
-    # GET LIST OF EXISTING VALUES
-    stmt = f'SELECT {val_col} FROM {table} WHERE {key_col} = ? ' \
-           f'AND {val_col} IN ({str_list})'
+            curs.execute(stmt)
 
-    curs.execute(stmt, (key,))
-    db_values = [s for (s,) in curs]
+            # GET LIST OF EXISTING VALUES
+            stmt = f'SELECT {val_col} FROM {table} WHERE {key_col} = ? ' \
+                   f'AND {val_col} IN ({str_list})'
 
-    for value in values:
-        if value not in db_values:
-            stmt = f'INSERT INTO {table} ({key_col}, {val_col}) ' \
-                   f'VALUES (?, ?)'
-            curs.execute(stmt, (key, value))
+            curs.execute(stmt, (key,))
+            db_values = [s for (s,) in curs]
 
-    in_db.commit()
+            for value in values:
+                if value not in db_values:
+                    stmt = f'INSERT INTO {table} ({key_col}, {val_col}) ' \
+                           f'VALUES (?, ?)'
+                    curs.execute(stmt, (key, value))
+
+            curs.execute(COMMIT_TRAN)
+            tryagain = False
+        except mariadb.Error as e:
+            print(f'Error: {e}.')
+            print(f'Attempt: {attempt}. '
+                  f'Waiting {retry_delay} seconds to retry.')
+            time.wait(retry_delay)
+            tryagain = True
+        except:
+            raise
     in_db.autocommit = save_commit_state
     pass
 
