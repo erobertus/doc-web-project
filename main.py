@@ -375,6 +375,18 @@ def request_workload(conn: 'connection',
     return (batch_id, tuple(src_list))
 
 
+def finish_workload(conn: 'connection', batch_id):
+
+    curs = conn.cursor()
+    s = f'UPDATE {BATCH_HEAD_TBL} SET Completed = 1, ' \
+        f'InProgress = 0, end_date = now(),' \
+        f'status_date = now() ' \
+        f'WHERE batch_uno = ?'
+
+    curs.execute(s, (batch_id,))
+    conn.commit
+
+
 def update_detail_table(conn: 'connection',
                    cpso_no: int, perm_exclude=False,
                    batch_id=0):
@@ -759,6 +771,7 @@ if __name__ == '__main__':
             connect_db.commit()
             connect_db.autocommit = save_commit_state
 
+        finish_workload(connect_db, batch_no)
         workload = request_workload(connect_db, random=False,
                                     batch_size=20,
                                     min_val=CPSO_START,
