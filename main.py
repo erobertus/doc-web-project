@@ -232,7 +232,7 @@ def update_x_table(in_db: 'connection', table: str,
 
             curs.execute(COMMIT_TRAN)
             tryagain = False
-        except mariadb.Error as e:
+        except mariadb.OperationalError as e:
             print(f'Error: {e}.')
             print(f'Attempt: {attempt}. '
                   f'Waiting {retry_delay} seconds to retry.')
