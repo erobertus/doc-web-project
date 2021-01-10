@@ -328,6 +328,7 @@ def request_workload(conn: 'connection',
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
+    curs.execute(BEGIN_TRAN)
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
            f'VALUES ({batch_size}, user())'
     curs.execute(stmt)
@@ -353,12 +354,9 @@ def request_workload(conn: 'connection',
 
     stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
            f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
-           'AND ((isCompleted AND ' \
-           'updated_date_time < NOW() - INTERVAL ' \
+           'AND updated_date_time > (NOW() - INTERVAL ' \
            f'{interval} DAY) ' \
-           'OR (NOT isCompleted AND ' \
-           f'updated_date_time >= NOW()-INTERVAL {interval} DAY) ' \
-           f'OR PermExcluded) ' \
+           f'OR PermExcluded ' \
            f'ORDER BY {C_CPSO_NO}'
 
     curs.execute(stmt)
@@ -372,7 +370,7 @@ def request_workload(conn: 'connection',
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
            f'updated_date_time) VALUES ({batch_id}, ?, NOW())'
     curs.executemany(stmt, tuple([(x,) for x in src_list]))
-    conn.commit()
+    curs.execute(COMMIT_TRAN)
     conn.autocommit = save_commit_state
     return (batch_id, tuple(src_list))
 
