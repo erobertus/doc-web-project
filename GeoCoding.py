@@ -17,9 +17,46 @@ CONST_SQL = "SELECT a.postal_code, COUNT(*) `cnt`,	\n" \
             "WHERE a.postal_code IS NOT NULL\n" \
             "	AND a.prov_code = 'ON'\n" \
             "	AND a.country = 'Canada'\n" \
-            "	AND a.address_1 <> 'Practice Address Not Available'\n" \
+            f"	AND a.address_1 <> '{NO_ADDR}'\n" \
             "GROUP BY a.postal_code_clean\n" \
-            "HAVING COUNT(*) between 2 and 4"
+            "HAVING COUNT(*) > 1"
+
+MD_SQL = "SELECT a.postal_code, a.row_uno `addr_uno`,\n" \
+         "	CONCAT(a.address_1,\n" \
+         "	IF(COALESCE(a.address_2, '') <> '', " \
+         "CONCAT(', ', a.address_2), ''),\n" \
+         "	IF(COALESCE(a.address_3, '') <> '', " \
+         "CONCAT(', ', a.address_3), ''),\n" \
+         "	IF(COALESCE(a.address_4, '') <> '', " \
+         "CONCAT(', ', a.address_4), ''),\n" \
+         "	', ', a.city, ' ', a.prov_code, '  ', a.postal_code, " \
+         "', ', a.country) `full_address`, a.prov_code, a.country\n" \
+         "FROM z847e_MD_dir d\n" \
+         "JOIN MD_addresses a ON d.CPSO_no = a.CPSO_no\n" \
+         "LEFT JOIN MD_addr_x_geo ag ON a.row_uno = ag.addr_uno\n" \
+         "LEFT JOIN MD_geo_pos gp ON ag.geo_uno = gp.geo_uno\n" \
+         "WHERE d.reg_stat_code = 1\n" \
+         f"AND a.address_1 <> '{NO_ADDR}'\n" \
+         "AND a.country = 'Canada'\n" \
+         "AND a.prov_code = 'ON'\n" \
+         "-- AND a.postal_code IS NOT NULL\n" \
+         "AND (ag.row_uno IS NULL)\n" \
+         "ORDER BY d.CPSO_no"
+
+LINK_POSTAL = f'INSERT INTO {ADDR_X_GEO_TABLE} (addr_uno, geo_uno)\n' \
+               'SELECT a.row_uno, gp.geo_uno\n' \
+               'FROM MD_geo_pos gp\n' \
+               '	JOIN MD_addresses a ' \
+               'ON gp.user_postal_code = a.postal_code\n' \
+               '	LEFT JOIN MD_addr_x_geo ag ' \
+               'ON a.row_uno = ag.addr_uno ' \
+               'AND gp.geo_uno = ag.geo_uno\n' \
+               'WHERE gp.user_postal_code = ?\n' \
+               '	AND ag.row_uno IS NULL'
+
+LINK_BY_UNO = f'INSERT INTO {ADDR_X_GEO_TABLE} ' \
+              f'(addr_uno, geo_uno)\n' \
+              f'VALUES (?, ?)'
 
 API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
 
@@ -28,7 +65,8 @@ def get_geocode(in_addr: str):
 
 
 def link_geocode_all(conn_db: 'connection',
-                 incl_prov=(ALL,), incl_cntry=(ALL,)):
+                     incl_prov=(ALL,), incl_cntry=(ALL,),
+                     use_postal=True):
     ADDR_COMPONENTS = 'address_components'
     STR_NO = 'street_number'
     TYPES = 'types'
@@ -53,20 +91,24 @@ def link_geocode_all(conn_db: 'connection',
 
     gmaps = googlemaps.Client(key=API_KEY)
 
-    curs.execute(CONST_SQL)
-    result_set = [(postal, cnt, addr, prov, cntry) for
-                  (postal, cnt, addr, prov, cntry) in curs]
+    if use_postal:
+        stmt = CONST_SQL
+    else:
+        stmt = MD_SQL
+    curs.execute(stmt)
+    result_set = [(postal, cnt_or_id, addr, prov, cntry) for
+                  (postal, cnt_or_id, addr, prov, cntry) in curs]
     iteration = 1
     google_calls = 0
     total_iterations = len(result_set)
-    for (postal, cnt, addr, prov, cntry) \
+    for (postal, cnt_or_id, addr, prov, cntry) \
             in result_set:
         print(f"{iteration}(G:{google_calls})/{total_iterations}: "
               f"=== Checking address: ", addr)
         # get if postal already stored
         curs.execute(BEGIN_TRAN)
         stmt = f'SELECT geo_uno FROM {GEO_TABLE} ' \
-               f'WHERE postal_code = ? and prov_code = ? ' \
+               f'WHERE user_postal_code = ? and prov_code = ? ' \
                f'and country = ? FOR UPDATE'
         curs.execute(stmt, (postal, prov, cntry))
 
@@ -78,6 +120,20 @@ def link_geocode_all(conn_db: 'connection',
             print("\t...not found, asking Google...", end='')
             geocode_result = gmaps.geocode(addr)
             google_calls += 1
+            s = addr
+
+            while len(geocode_result) == 0:
+                # try to reformat address and make sens e of it
+                s = s.split(DELIM_COMMA)
+                if len(s) > 1:
+                    s = DELIM_COMMA.join(s[1:])
+                else:
+                    break
+                print("Hmmmm....Trying to make sense of address:")
+                print(f'Maybe this will be better: {s}')
+                geocode_result = gmaps.geocode(s)
+                google_calls += 1
+
             g_data = {}
             for geocode in geocode_result:
                 for type in (STR_NO, STR_NAME, CITY_NAME,
@@ -115,20 +171,20 @@ def link_geocode_all(conn_db: 'connection',
                        f'   street_no, street_name, ' \
                        f'city, prov_code, ' \
                        f'   county, postal_code, ' \
-                       f'postal_code_clean, ' \
+                       f'user_postal_code, postal_code_clean, ' \
                        f'   country)\n' \
                        f'VALUES (\n' \
                        f'   ?, ?, ' \
                        'POINTFROMTEXT(' \
                        'CONCAT("POINT(",?, " ", ?, ")")),' \
                        f' ?, ?, ?, ?,\n' \
-                       f'   ?, ?, ?, ?, ?, ?, ?, ?)'
+                       f'   ?, ?, ?, ?, ?,?, ?, ?, ?)'
                 v = (lat, lng, str(lat), str(lng))
                 v += tuple([x for x in g_streets])
                 v += (g_data[STR_NO], g_data[STR_NAME],
                       g_data[CITY_NAME], g_data[PROV_NAME],
                       g_data[COUNTY_NAME])
-                v += (g_data[POSTAL_NAME],
+                v += (g_data[POSTAL_NAME], postal,
                       g_data[POSTAL_NAME].replace(' ', ''),
                       g_data[COUNTRY_NAME])
 
@@ -138,18 +194,14 @@ def link_geocode_all(conn_db: 'connection',
         # GET LIST OF ADDRESS UNOS
 
         print(f'...Updating link table {ADDR_X_GEO_TABLE}... ', end='')
-        stmt = f'INSERT INTO {ADDR_X_GEO_TABLE} (addr_uno, geo_uno)\n' \
-               'SELECT a.row_uno, gp.geo_uno\n' \
-               'FROM MD_geo_pos gp\n' \
-               '	JOIN MD_addresses a ' \
-               'ON gp.postal_code = a.postal_code\n' \
-               '	LEFT JOIN MD_addr_x_geo ag ' \
-               'ON a.row_uno = ag.addr_uno ' \
-               'AND gp.geo_uno = ag.geo_uno\n' \
-               'WHERE gp.postal_code = ?\n' \
-               '	AND ag.row_uno IS NULL'
+        if use_postal:
+            stmt = LINK_POSTAL
+            curs.execute(stmt, (postal,))
+        else:
+            stmt = LINK_BY_UNO
+            val_t = [(cnt_or_id, x) for x in geo_unos]
+            curs.executemany(stmt, val_t)
 
-        curs.execute(stmt, (postal,))
         print(f'{curs.rowcount} row(s) affected.')
         curs.execute(COMMIT_TRAN)
         iteration += 1
@@ -171,7 +223,7 @@ if __name__ == '__main__':
     except mariadb.Error as e:
         print(f"Error connecting to MariaDB Platform: {e}")
 
-    link_geocode_all(connect_db)
+    link_geocode_all(connect_db, use_postal=False)
 
 
     """
