@@ -56,11 +56,13 @@ def link_geocode_all(conn_db: 'connection',
     curs.execute(CONST_SQL)
     result_set = [(postal, cnt, addr, prov, cntry) for
                   (postal, cnt, addr, prov, cntry) in curs]
-    i = 1
-    j = len(result_set)
+    iteration = 1
+    google_calls = 0
+    total_iterations = len(result_set)
     for (postal, cnt, addr, prov, cntry) \
             in result_set:
-        print(f"({i}/{j}) Checking address: ", addr)
+        print(f"{iteration}(G:{google_calls})/{total_iterations}: "
+              f"=== Checking address: ", addr)
         # get if postal already stored
         curs.execute(BEGIN_TRAN)
         stmt = f'SELECT geo_uno FROM {GEO_TABLE} ' \
@@ -75,25 +77,24 @@ def link_geocode_all(conn_db: 'connection',
         if addr != NO_ADDR and do_geocode:
             print("\t...not found, asking Google...", end='')
             geocode_result = gmaps.geocode(addr)
-
-            g_streets = []
+            google_calls += 1
+            g_data = {}
             for geocode in geocode_result:
                 for addr_part in geocode[ADDR_COMPONENTS]:
                     for types in addr_part[TYPES]:
-                        if types == STR_NO:
-                            g_str_no = addr_part[SHORT_NAME]
-                        elif types == STR_NAME:
-                            g_streets.append(addr_part[SHORT_NAME])
-                        elif types == CITY_NAME:
-                            g_city = addr_part[SHORT_NAME]
-                        elif types == COUNTY_NAME:
-                            g_county = addr_part[SHORT_NAME]
-                        elif types == PROV_NAME:
-                            g_prov = addr_part[SHORT_NAME]
-                        elif types == COUNTRY_NAME:
-                            g_country = addr_part[LONG_NAME]
-                        elif types == POSTAL_NAME:
-                            g_postal = addr_part[SHORT_NAME]
+                        if types in (STR_NO, STR_NAME, CITY_NAME,
+                                     COUNTY_NAME, PROV_NAME,
+                                     POSTAL_NAME):
+                            g_data[types] = addr_part[SHORT_NAME]
+                        elif types in (COUNTRY_NAME,):
+                            g_data[types] = addr_part[LONG_NAME]
+
+                if len(g_data[POSTAL_NAME]) < 7:
+                    # presume priority of user data over Google
+                    g_data[POSTAL_NAME] = postal
+
+                g_streets = [g_data[STR_NAME]]
+
                 for i in range(len(g_streets),4):
                     g_streets.append(BLANK)
 
@@ -119,8 +120,12 @@ def link_geocode_all(conn_db: 'connection',
                        f'   ?, ?, ?, ?, ?, ?, ?, ?)'
                 v = (lat, lng, str(lat), str(lng))
                 v += tuple([x for x in g_streets])
-                v += (g_str_no, g_streets[0], g_city, g_prov, g_county)
-                v += (g_postal, g_postal.replace(' ', ''), g_country)
+                v += (g_data[STR_NO], g_data[STR_NAME],
+                      g_data[CITY_NAME], g_data[PROV_NAME],
+                      g_data[COUNTY_NAME])
+                v += (g_data[POSTAL_NAME],
+                      g_data[POSTAL_NAME].replace(' ', ''),
+                      g_data[COUNTY_NAME])
 
                 curs.execute(stmt, v)
                 geo_unos.append(curs.lastrowid)
@@ -142,7 +147,7 @@ def link_geocode_all(conn_db: 'connection',
         curs.execute(stmt, (postal,))
         print(f'{curs.rowcount} row(s) affected.')
         curs.execute(COMMIT_TRAN)
-        i += 1
+        iteration += 1
     # conn_db.commit()
     conn_db.autocommit = save_commit_state
 
