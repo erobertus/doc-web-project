@@ -181,6 +181,8 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                 addr_dict[C_ADDR_PREFIX + str(addr_line)] = \
                     addr_list[j]
                 addr_line += 1
+                if addr_line > 4:
+                    streets_filled = True
                 at_top_of_addr = False
 
             j += 1
