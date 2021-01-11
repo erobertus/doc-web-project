@@ -19,7 +19,7 @@ CONST_SQL = "SELECT a.postal_code, COUNT(*) `cnt`,	\n" \
             "	AND a.country = 'Canada'\n" \
             "	AND a.address_1 <> 'Practice Address Not Available'\n" \
             "GROUP BY a.postal_code_clean\n" \
-            "HAVING COUNT(*) > 4"
+            "HAVING COUNT(*) between 2 and 4"
 
 API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
 
@@ -80,6 +80,10 @@ def link_geocode_all(conn_db: 'connection',
             google_calls += 1
             g_data = {}
             for geocode in geocode_result:
+                for type in (STR_NO, STR_NAME, CITY_NAME,
+                                     COUNTY_NAME, PROV_NAME,
+                                     POSTAL_NAME, COUNTRY_NAME):
+                    g_data[type] = ''
                 for addr_part in geocode[ADDR_COMPONENTS]:
                     for types in addr_part[TYPES]:
                         if types in (STR_NO, STR_NAME, CITY_NAME,
@@ -88,6 +92,7 @@ def link_geocode_all(conn_db: 'connection',
                             g_data[types] = addr_part[SHORT_NAME]
                         elif types in (COUNTRY_NAME,):
                             g_data[types] = addr_part[LONG_NAME]
+
 
                 if len(g_data[POSTAL_NAME]) < 7:
                     # presume priority of user data over Google
@@ -125,7 +130,7 @@ def link_geocode_all(conn_db: 'connection',
                       g_data[COUNTY_NAME])
                 v += (g_data[POSTAL_NAME],
                       g_data[POSTAL_NAME].replace(' ', ''),
-                      g_data[COUNTY_NAME])
+                      g_data[COUNTRY_NAME])
 
                 curs.execute(stmt, v)
                 geo_unos.append(curs.lastrowid)
