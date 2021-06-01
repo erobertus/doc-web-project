@@ -258,8 +258,11 @@ def update_record(in_db: 'connection', records: list,
 
     key_col = DB_SCHEMA[table][T_KEY]
 
-    stmt = f'DELETE FROM {table} WHERE {key_col} = ?'
+    # stmt = f'DELETE FROM {table} WHERE {key_col} = ?'
+    stmt = f'SELECT COUNT(*) FROM {table} WHERE {key_col} = ?'
     curs.execute(stmt, (key_val,))
+    for (record_exists,) in curs:
+        pass
 
     for record in records:
         iteration += 1
@@ -285,12 +288,26 @@ def update_record(in_db: 'connection', records: list,
                 cur_rec[c_name] = c_val
 
         if len(cur_rec) > 1:
-            col_str = ', '.join(cur_rec.keys())
-            val_str = ', '.join('?' * len(cur_rec))
-            stmt = f'INSERT INTO {table} ({col_str}) ' \
-                   f'VALUES({val_str})'
+
+            if record_exists:
+                stmt = f'UPDATE {table} SET '
+
+                s = tuple()
+                for cur_key in cur_rec.keys():
+                    if cur_key != key_col:
+                        s += (cur_key + ' = ?',)
+
+                stmt += ', '.join(s)
+                stmt += f' WHERE {key_col} = ?'
+                cur_values = tuple(cur_rec.values()) + (key_val,)
+            else:
+                col_str = ', '.join(cur_rec.keys())
+                val_str = ', '.join('?' * len(cur_rec))
+                stmt = f'INSERT INTO {table} ({col_str}) ' \
+                       f'VALUES({val_str})'
+                cur_values = tuple(cur_rec.values())
             try:
-                curs.execute(stmt, tuple(cur_rec.values()))
+                curs.execute(stmt, cur_values)
                 if T_OWNKEY in DB_SCHEMA[table].keys():
                     record[DB_SCHEMA[table][T_OWNKEY]] = \
                         curs.lastrowid

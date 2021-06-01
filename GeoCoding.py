@@ -123,7 +123,7 @@ def link_geocode_all(conn_db: 'connection',
             s = addr
 
             while len(geocode_result) == 0:
-                # try to reformat address and make sens e of it
+                # try to reformat address and make sense of it
                 s = s.split(DELIM_COMMA)
                 if len(s) > 1:
                     s = DELIM_COMMA.join(s[1:])
