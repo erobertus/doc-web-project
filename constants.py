@@ -88,6 +88,7 @@ C_ADDR_FAX_NO = 'fax_no'
 C_ADDR_COUNTY = 'county'
 C_ADDR_IS_DEF = 'isDefault'
 C_ADDR_UNO = 'row_uno'
+C_GEO_UNO = 'geo_uno'
 NO_ADDR = 'Practice Address Not Available'
 
 POSTAL_SEPARATOR = '\xa0'
