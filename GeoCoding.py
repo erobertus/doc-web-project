@@ -97,6 +97,16 @@ def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
     save_commit_state = in_db.autocommit
     in_db.autocommit = False
     db_cursor = in_db.cursor()
+
+    if type(addr) != str:
+        addr = ''
+    if type(prov) != str:
+        prov = ''
+    if type(postal) != str:
+        postal = ''
+    if type(cntry) != str:
+        cntry = ''
+
     # get if postal already stored
 
     stmt = f'SELECT geo_uno FROM {GEO_TABLE} ' \
