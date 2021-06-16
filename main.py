@@ -866,7 +866,7 @@ if __name__ == '__main__':
 
 
         finish_workload(connect_db, batch_no)
-        workload = request_workload(connect_db, random=False,
+        workload = request_workload(connect_db, random=True,
                                     batch_size=10,
                                     min_val=CPSO_START,
                                     max_val=CPSO_STOP)
