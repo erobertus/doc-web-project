@@ -92,23 +92,26 @@ def get_geocode(in_addr: str):
     pass
 
 
-def get_geocode_db_uno(db_cursor: 'cursor', addr: str, prov: str,
+def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
                        postal: str, cntry: str) -> tuple:
-
+    save_commit_state = in_db.autocommit
+    in_db.autocommit = False
+    db_cursor = in_db.cursor()
     # get if postal already stored
 
     stmt = f'SELECT geo_uno FROM {GEO_TABLE} ' \
-           f'WHERE user_postal_code = ? and prov_code = ? ' \
+           f'WHERE (user_postal_code = ? or postal_code = ? or ' \
+           f'postal_code_clean = ?) and prov_code = ? ' \
            f'and country = ? FOR UPDATE'
-    db_cursor.execute(stmt, (postal, prov, cntry))
+    db_cursor.execute(stmt, (postal, postal, postal, prov, cntry))
 
     geo_unos = [x for (x,) in db_cursor]
 
-    do_geocode = len(geo_unos) == 0
+    do_geocode = (len(geo_unos) == 0)
     google_calls = 0
 
     if addr != NO_ADDR and do_geocode:
-        print("\t...not found, asking Google...", end='')
+        print(f"{addr}\t...not found, asking Google...\n", end='')
         gmaps = googlemaps.Client(key=API_KEY)
         geocode_result = gmaps.geocode(addr)
         google_calls += 1
@@ -183,6 +186,9 @@ def get_geocode_db_uno(db_cursor: 'cursor', addr: str, prov: str,
             geo_unos.append(db_cursor.lastrowid)
             print(
                 f"\tGeo table {GEO_TABLE} updated with ID {db_cursor.lastrowid}")
+
+        in_db.commit()
+        in_db.autocommit = save_commit_state
     return google_calls, geo_unos
 
 
@@ -214,7 +220,7 @@ def link_geocode_all(conn_db: 'connection',
 
         # GET LIST OF ADDRESS UNOS
         curs.execute(BEGIN_TRAN)
-        g_calls, geo_unos =get_geocode_db_uno(curs, addr, prov,
+        g_calls, geo_unos = get_geocode_db_uno(conn_db, addr, prov,
                                               postal, cntry)
         tot_g_calls += g_calls
 

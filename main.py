@@ -8,6 +8,7 @@ import mariadb
 import googlemaps
 import time
 from constants import *
+from GeoCoding import get_geocode_db_uno
 
 
 # NnBgmX$t^+tG
@@ -114,7 +115,7 @@ def is_postal(s: str) -> bool:
     return re.search(re_pattern, s) is not None
 
 
-def processs_address(source: 'ResultSet') -> list[dict]:
+def processs_address(conn_db: 'connection', source: 'ResultSet') -> list[dict]:
     addr_dict = {}
     return_list = []
     idx = 0
@@ -186,6 +187,7 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                 at_top_of_addr = False
 
             j += 1
+
             if is_at_top_of_address(addr_list, j):
                 if len(addr_dict) > 0:
                     return_list.append(addr_dict)
@@ -193,6 +195,44 @@ def processs_address(source: 'ResultSet') -> list[dict]:
                     at_top_of_addr = True
 
         idx += 1
+
+    for i in range(len(return_list)):
+
+        if return_list[i][C_ADDR_PREFIX+'1'] == NO_ADDR:
+            break
+
+        t_addr_list = ()
+
+        for j in range(1,5):
+            if C_ADDR_PREFIX + str(j) in return_list[i]:
+                t_addr_list += (return_list[i][C_ADDR_PREFIX + str(j)],)
+            else:
+                break
+
+        full_addr = '\n'.join(t_addr_list)
+        t_str =''
+
+        if C_ADDR_CITY in return_list[i]:
+            t_str = return_list[i][C_ADDR_CITY]
+
+        if C_ADDR_PROV in return_list[i]:
+            t_str = ' '.join((t_str, return_list[i][C_ADDR_PROV]))
+
+        if C_ADDR_POSTAL in return_list[i]:
+            t_str = '  '.join((t_str, return_list[i][C_ADDR_POSTAL]))
+
+        if C_ADDR_COUNTRY in return_list[i]:
+            t_str = '\n'.join((t_str, return_list[i][C_ADDR_COUNTRY]))
+
+        full_addr = '\n'.join((full_addr, t_str))
+
+        _, geo_uno = get_geocode_db_uno(conn_db, full_addr,
+                           return_list[i].get(C_ADDR_PROV),
+                           return_list[i].get(C_ADDR_POSTAL),
+                           return_list[i].get(C_ADDR_COUNTRY))
+
+        if len(geo_uno) > 0:
+            return_list[i][C_GEO_UNO] = geo_uno[0]
 
     return return_list
 
@@ -691,7 +731,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
                 i += 1
 
         all_info = page.find_all(DIV, class_=CL_ADD_PR_LOC)
-        record[MD_ADDR_TABLE] = processs_address(all_info)
+        record[MD_ADDR_TABLE] = processs_address(conn, all_info)
 
         all_info = page.find_all(SECT,
                                  class_=CL_SPECIALTIES,
