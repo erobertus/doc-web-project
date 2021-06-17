@@ -88,9 +88,6 @@ UPD_BY_POSTAL = f'UPDATE {MD_ADDR_TABLE} a\n' \
 
 API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
 
-def get_geocode(in_addr: str):
-    pass
-
 
 def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
                        postal: str, cntry: str) -> tuple:
@@ -98,13 +95,14 @@ def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
     in_db.autocommit = False
     db_cursor = in_db.cursor()
 
-    if type(addr) != str:
+    if not isinstance(addr, str):
         addr = ''
-    if type(prov) != str:
+
+    if not isinstance(prov, str):
         prov = ''
-    if type(postal) != str:
+    if not isinstance(postal, str):
         postal = ''
-    if type(cntry) != str:
+    if not isinstance(cntry, str):
         cntry = ''
 
     # get if postal already stored
@@ -121,7 +119,7 @@ def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
     google_calls = 0
 
     if addr != NO_ADDR and do_geocode:
-        print(f"{addr}\t...not found, asking Google...\n", end='')
+        print("=" * 20 + f"\n{addr}\n" + "=" * 20 +""\t...not found, asking Google...\n", end='')
         gmaps = googlemaps.Client(key=API_KEY)
         geocode_result = gmaps.geocode(addr)
         google_calls += 1
@@ -154,7 +152,7 @@ def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
                     elif types in (COUNTRY_NAME,):
                         g_data[types] = addr_part[LONG_NAME]
 
-            if len(g_data[POSTAL_NAME]) < 7:
+            if len(g_data[POSTAL_NAME]) < len(postal):
                 # presume priority of user data over Google
                 g_data[POSTAL_NAME] = postal
 
