@@ -119,7 +119,7 @@ def get_geocode_db_uno(in_db: 'connection', addr: str, prov: str,
     google_calls = 0
 
     if addr != NO_ADDR and do_geocode:
-        print("=" * 20 + f"\n{addr}\n" + "=" * 20 + f"...not found, asking Google...\n", end='')
+        print("\n" + "=" * 20 + f"\n{addr}\n" + "=" * 20 + "\r...not found, asking Google...\n", end='')
         gmaps = googlemaps.Client(key=API_KEY)
         geocode_result = gmaps.geocode(addr)
         google_calls += 1
