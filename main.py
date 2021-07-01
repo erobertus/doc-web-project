@@ -24,6 +24,8 @@ def reformat_date(cpso_date: str) -> str:
         x = t[0]
         t[0] = t[2]
         t[2] = x
+    else:
+        t = ('1900', '01', '01')
     return '-'.join(t)
 
 
@@ -647,7 +649,10 @@ def process_record(conn: 'connection', cur_CPSO: int,
             info = [re.sub(r'[\r\n\t\s]+as of[\r\n\t\s]*',
                            ' as of ', s)
                     for s in cur_info.stripped_strings]
-            info[1] = info[1].split(' as of ')
+            if len(info) > 1:
+                info[1] = info[1].split(' as of ')
+            else:
+                info.append(['', ''])
 
             if info[0] == WEB_MEMBER_STAT:
                 record[C_REG_STAT_CODE] = retrieve_code_from_name(
