@@ -849,8 +849,8 @@ if __name__ == '__main__':
     curs = connect_db.cursor()
     # for cpso_no in range(108493,150000): # TEST_CPSO:
 
-    workload = request_workload(connect_db, random=False,
-                                batch_size=10,
+    workload = request_workload(connect_db, random=USE_RANDOM,
+                                batch_size=BATCH_SIZE,
                                 min_val=CPSO_START, max_val=CPSO_STOP)
 
     while len(workload[1]) > 0:
@@ -871,8 +871,8 @@ if __name__ == '__main__':
 
 
         finish_workload(connect_db, batch_no)
-        workload = request_workload(connect_db, random=False,
-                                    batch_size=10,
+        workload = request_workload(connect_db, random=USE_RANDOM,
+                                    batch_size=BATCH_SIZE,
                                     min_val=CPSO_START,
                                     max_val=CPSO_STOP)
 
