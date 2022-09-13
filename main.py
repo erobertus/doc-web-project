@@ -818,8 +818,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
         update_detail_table(conn, cur_CPSO, batch_id=batch_id)
     else:
         print(f'({batch_id}) CPSO: {cur_CPSO} - cannot obtain. '
-              f'Response: {response.status_code}; '
-              f'Error: {error_str}')
+              f'Response: {response.status_code}')
 
         if exclude_invalid:
             update_detail_table(conn, cur_CPSO,
