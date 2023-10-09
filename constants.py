@@ -1,5 +1,5 @@
 BATCH_SIZE = 50
-USE_RANDOM = True
+USE_RANDOM = False
 
 ALL_DR_SEARCH_CHECKMARK = \
     "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
