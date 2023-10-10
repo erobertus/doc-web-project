@@ -604,7 +604,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
 
     result_dict = {}
 
-    browser = ms.StatefulBrowser(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/84.0')
+    browser = ms.StatefulBrowser(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:84.0) Gecko/20100101 Firefox/118.0.1')
     url = 'https://doctors.cpso.on.ca/?search=general'
 
     tryagain = True
@@ -623,7 +623,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
             browser.launch_browser()
             time.sleep(30)
             tryagain = True
-    response = browser.submit_selected()
+    response = browser.submit_selected(btnName=SEARCH_SUBMIT_BUTTON)
     record = {C_CPSO_NO: cur_CPSO}
     page = response.soup
     error_str = ''

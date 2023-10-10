@@ -1,6 +1,8 @@
 BATCH_SIZE = 50
 USE_RANDOM = False
 
+SEARCH_SUBMIT_BUTTON = 'p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_AllDoctorsSearch$btnSubmit1'
+
 ALL_DR_SEARCH_CHECKMARK = \
     "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
     "AllDoctorsSearch$chkInactiveDoctors"
@@ -185,8 +187,10 @@ TEST_CPSO = (10310, 102166,
              100248, 70079, 100249, 100174, 100023, 10022,
              94129, 115098, 10065, 22278, 110310, 82099, 86495)
 
-CPSO_START = 10000
-CPSO_STOP = 140100
+CPSO_START = 82834
+CPSO_STOP = 82835
+# CPSO_START = 10000
+# CPSO_STOP = 140100
 
 API_KEY = 'AIzaSyBkKoxxJxWNpPluVYD0HRt3ya05HctSTn4'
 
