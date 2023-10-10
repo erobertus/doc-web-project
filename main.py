@@ -646,11 +646,12 @@ def process_record(conn: 'connection', cur_CPSO: int,
     record = {C_CPSO_NO: cur_CPSO}
     page = response.soup
     error_str = ''
+    error_list = []
 
     if response.status_code == 200:
-        error_str = page.find_all(DIV, class_=CL_ERROR)
+        error_list = page.find_all(DIV, class_=CL_ERROR)
 
-    if response.status_code == 200 and len(error_str) == 0:
+    if response.status_code == 200 and len(error_list) == 0:
         name = re.sub(r'(\r\n|\t|\s)', ' ', page.h1.string).strip()
         names = name.split(',')
         record[C_LNAME] = names[0].strip(',')
@@ -836,9 +837,10 @@ def process_record(conn: 'connection', cur_CPSO: int,
 
         update_detail_table(conn, cur_CPSO, batch_id=batch_id)
     else:
+        error_str = error_list[0].get_text().replace('\n', '')
         print(f'({batch_id}) CPSO: {cur_CPSO} - cannot obtain. '
-              f'Response: {response.status_code}')
-              # f'Error: {error_str}')
+              f'Response: {response.status_code}. '
+              f'MESSAGE: "{error_str}"')
 
         if exclude_invalid:
             update_detail_table(conn, cur_CPSO,
