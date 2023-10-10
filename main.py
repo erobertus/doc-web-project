@@ -425,20 +425,34 @@ def request_workload(conn: 'connection',
 
         src_list = [cpso_no for (cpso_no, order) in curs]
 
-    stmt = f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
-           f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
-           'AND (updated_date_time > (NOW() - INTERVAL ' \
-           f'{interval} DAY) ' \
-           f'OR PermExcluded) ' \
-           f'ORDER BY {C_CPSO_NO} FOR UPDATE'
+    stmt = f'CREATE TEMPORARY TABLE _TMP_{batch_id} (' \
+           f'cpso_no INT(11),' \
+           f'PRIMARY KEY (cpso_no))'
 
     curs.execute(stmt)
 
-    for (cpso_no,) in curs:
-        if cpso_no in src_list:
-            src_list.remove(cpso_no)
+    stmt = f'INSERT INTO _TMP_{batch_id} VALUES (' \
+           + '), ('.join(map(str,src_list)) \
+           + ')'
 
-    src_list = src_list[:batch_size]
+    curs.execute(stmt)
+
+    stmt = f'SELECT cpso_no FROM _TMP_{batch_id} ' \
+           f'WHERE cpso_no not in (' \
+           f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
+           f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
+           'AND (updated_date_time > (NOW() - INTERVAL ' \
+           f'{interval} DAY) ' \
+           'OR PermExcluded) ) ' \
+           f'LIMIT {batch_size}'
+
+    curs.execute(stmt)
+
+#    for (cpso_no,) in curs:
+#        if cpso_no in src_list:
+#            src_list.remove(cpso_no)
+
+    src_list = [cpso_no for (cpso_no,) in curs]
 
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
            f'updated_date_time) VALUES '
@@ -453,6 +467,11 @@ def request_workload(conn: 'connection',
 
     # conn.commit()
     conn.autocommit = save_commit_state
+
+    # Drop temp table
+    stmt = f'DROP TEMPORARY TABLE _TMP_{batch_id}'
+    curs.execute(stmt)
+
     return (batch_id, tuple(src_list))
 
 
