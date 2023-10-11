@@ -837,7 +837,11 @@ def process_record(conn: 'connection', cur_CPSO: int,
 
         update_detail_table(conn, cur_CPSO, batch_id=batch_id)
     else:
-        error_str = error_list[0].get_text().replace('\n', '')
+        if response.status_code == 200:
+            error_str = error_list[0].get_text().replace('\n', '')
+        else:
+            error_str = re.sub('(\r|\t|\n)+', ' ', page.get_text())
+
         print(f'({batch_id}) CPSO: {cur_CPSO} - cannot obtain. '
               f'Response: {response.status_code}. '
               f'MESSAGE: "{error_str}"')
