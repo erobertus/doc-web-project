@@ -863,27 +863,33 @@ if __name__ == '__main__':
         description='CPSO web site parse utility '
                     '(c) Eugene Robertus, 2021')
     parser.add_argument('-s', '--cpso-start', type=int,
-                        help='CPSO number to start from',
+                        help='CPSO number to start from '
+                             '(default=10000)',
                         default=10000)
     parser.add_argument('-e', '--cpso-stop', type=int,
                         default=158100,
-                        help='CPSO number to stop at ')
+                        help='CPSO number to stop at '
+                             '(default=158100)')
     parser.add_argument('--db-host', type=str,
                         default='faxcomet.com',
-                        help='host name where database is located')
+                        help='host name where database is located '
+                             '(default=faxcomet.com')
     parser.add_argument('-d','--db-name', type=str,
                         default='faxcomet_MD_list',
-                        help='database name')
+                        help='database name (default=faxcomet_MD_list')
     parser.add_argument('-u', '--db-user', type=str,
                         default='faxcomet_scrape',
-                        help='database user')
+                        help='database user '
+                             '(default=faxcomet_scrape)')
     parser.add_argument('-p', '--db-pass',
                         '--db-password', '-db-pwd', type=str,
                         default='NnBgmX$t^+tG',
-                        help='database user password')
+                        help='database user password '
+                             '(default <hidden>)')
     parser.add_argument('--db-port', type=int,
                         default=3306,
-                        help='database port for connection')
+                        help='database port for connection '
+                             '(default=3306')
 
     args = parser.parse_args()
 
