@@ -873,10 +873,11 @@ if __name__ == '__main__':
     parser.add_argument('--db-host', type=str,
                         default='faxcomet.com',
                         help='host name where database is located '
-                             '(default=faxcomet.com')
+                             '(default=faxcomet.com)')
     parser.add_argument('-d','--db-name', type=str,
                         default='faxcomet_MD_list',
-                        help='database name (default=faxcomet_MD_list')
+                        help='database name '
+                             '(default=faxcomet_MD_list)')
     parser.add_argument('-u', '--db-user', type=str,
                         default='faxcomet_scrape',
                         help='database user '
@@ -889,7 +890,7 @@ if __name__ == '__main__':
     parser.add_argument('--db-port', type=int,
                         default=3306,
                         help='database port for connection '
-                             '(default=3306')
+                             '(default=3306)')
 
     args = parser.parse_args()
 
