@@ -7,6 +7,7 @@ import re
 import mariadb
 import googlemaps
 import time
+import argparse
 from constants import *
 from GeoCoding import get_geocode_db_uno
 
@@ -857,14 +858,43 @@ def process_record(conn: 'connection', cur_CPSO: int,
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    # Process parameters here
+    parser = argparse.ArgumentParser(
+        description='CPSO web site parse utility '
+                    '(c) Eugene Robertus, 2021')
+    parser.add_argument('-s', '--cpso-start', type=int,
+                        help='CPSO number to start from',
+                        default=10000)
+    parser.add_argument('-e', '--cpso-stop', type=int,
+                        default=158100,
+                        help='CPSO number to stop at ')
+    parser.add_argument('--db-host', type=str,
+                        default='faxcomet.com',
+                        help='host name where database is located')
+    parser.add_argument('-d','--db-name', type=str,
+                        default='faxcomet_MD_list',
+                        help='database name')
+    parser.add_argument('-u', '--db-user', type=str,
+                        default='faxcomet_scrape',
+                        help='database user')
+    parser.add_argument('-p', '--db-pass',
+                        '--db-password', '-db-pwd', type=str,
+                        default='NnBgmX$t^+tG',
+                        help='database user password')
+    parser.add_argument('--db-port', type=int,
+                        default=3306,
+                        help='database port for connection')
+
+    args = parser.parse_args()
+
     # Connect to MariaDB Platform
     try:
         connect_db = mariadb.connect(
-            user="faxcomet_scrape",
-            password="NnBgmX$t^+tG",
-            host="faxcomet.com",
-            port=3306,
-            database="faxcomet_MD_list",
+            user=args.db_user,
+            password=args.db_pass,
+            host=args.db_host,
+            port=args.db_port,
+            database=args.db_name,
             compress=True
         )
     except mariadb.Error as e:
@@ -873,6 +903,8 @@ if __name__ == '__main__':
 
 
     curs = connect_db.cursor()
+    CPSO_START = args.cpso_start
+    CPSO_STOP = args.cpso_stop
     # for cpso_no in range(108493,150000): # TEST_CPSO:
 
     workload = request_workload(connect_db, random=USE_RANDOM,
