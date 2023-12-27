@@ -897,6 +897,11 @@ if __name__ == '__main__':
                         help='if set, use random iteration order '
                              '(default: iterate in '
                              'ascending sequence)')
+    parser.add_argument('--descending',
+                        action='store_true',
+                        help='if set, use descending iteration order '
+                             '(default: iterate in '
+                             'ascending sequence)')
     parser.add_argument('-z', '--batch-size', type=int,
                         default=50,
                         help='iteration batch size '
@@ -928,6 +933,16 @@ if __name__ == '__main__':
     BATCH_SIZE = args.batch_size
     # for cpso_no in range(108493,150000): # TEST_CPSO:
 
+    print(f"Running with following parameters:\n"
+          f"From CPSO  : {CPSO_START}\n"
+          f"To CPSO    : {CPSO_STOP}\n"
+          f"Host       : {args.db_host}\n"
+          f"Database   : {args.db_name}\n"
+          f"User       : {args.db_user}\n"
+          f"Random     : {USE_RANDOM}\n"
+          f"Batch size : {BATCH_SIZE}\n"
+          f"======================================")
+
     if args.abort:
         save_commit_state = connect_db.autocommit
         connect_db.autocommit = True
@@ -952,11 +967,15 @@ if __name__ == '__main__':
         workload = request_workload(connect_db, random=USE_RANDOM,
                                     batch_size=BATCH_SIZE,
                                     min_val=CPSO_START,
-                                    max_val=CPSO_STOP)
+                                    max_val=CPSO_STOP,
+                                    desc=args.descending)
 
         while len(workload[1]) > 0:
 
             batch_no = workload[0]
+            print(f"Running batch {batch_no} "
+                  f"({CPSO_START}-{CPSO_STOP}:{BATCH_SIZE})\n"
+                  f"======================================")
             for cpso_no in workload[1]:
                 all_recs = process_record(connect_db, cpso_no,
                                           batch_id=batch_no)
