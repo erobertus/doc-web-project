@@ -8,6 +8,7 @@ import mariadb
 import googlemaps
 import time
 import argparse
+from time import sleep
 from constants import *
 from GeoCoding import get_geocode_db_uno
 
@@ -891,7 +892,18 @@ if __name__ == '__main__':
                         default=3306,
                         help='database port for connection '
                              '(default=3306)')
-
+    parser.add_argument('-r', '--random',
+                        action='store_true',
+                        help='if set, use random iteration order '
+                             '(default: iterate in '
+                             'ascending sequence)')
+    parser.add_argument('-z', '--batch-size', type=int,
+                        default=50,
+                        help='iteration batch size '
+                             '(default=50)')
+    parser.add_argument('-a', '--abort',
+                        action='store_true',
+                        help='request abort of all running scrapes')
     args = parser.parse_args()
 
     # Connect to MariaDB Platform
@@ -912,33 +924,58 @@ if __name__ == '__main__':
     curs = connect_db.cursor()
     CPSO_START = args.cpso_start
     CPSO_STOP = args.cpso_stop
+    USE_RANDOM = args.random
+    BATCH_SIZE = args.batch_size
     # for cpso_no in range(108493,150000): # TEST_CPSO:
 
-    workload = request_workload(connect_db, random=USE_RANDOM,
-                                batch_size=BATCH_SIZE,
-                                min_val=CPSO_START, max_val=CPSO_STOP)
+    if args.abort:
+        save_commit_state = connect_db.autocommit
+        connect_db.autocommit = True
 
-    while len(workload[1]) > 0:
+        curs.execute(ABORT_SET_SQL)
+        running_tasks = 1
 
-        batch_no = workload[0]
-        for cpso_no in workload[1]:
-            all_recs = process_record(connect_db, cpso_no,
-                                      batch_id=batch_no)
-            update_record(connect_db, all_recs, MD_DIR_TABLE, cpso_no)
+        while running_tasks > 0:
+            print(f"Waiting {SECONDS_TO_WAIT} seconds for all tasks "
+                  f"to finish...")
+            sleep(SECONDS_TO_WAIT)
+            curs.execute(CHECK_STOP_STATUS)
+            running_tasks = curs.fetchone()[0]
+            print(f"Number of running tasks: {running_tasks}")
 
-            save_commit_state = connect_db.autocommit
-            connect_db.autocommit = False
-            for s in FINAL_SQL:
-                curs.execute(s, (cpso_no,))
+        print("All tasks stopped. Clearing database...")
+        curs.execute(ABORT_DEL_SQL)
+        connect_db.autocommit = save_commit_state
+        print("Done.")
 
-            connect_db.commit()
-            connect_db.autocommit = save_commit_state
-
-
-        finish_workload(connect_db, batch_no)
+    else:
         workload = request_workload(connect_db, random=USE_RANDOM,
                                     batch_size=BATCH_SIZE,
                                     min_val=CPSO_START,
                                     max_val=CPSO_STOP)
 
+        while len(workload[1]) > 0:
+
+            batch_no = workload[0]
+            for cpso_no in workload[1]:
+                all_recs = process_record(connect_db, cpso_no,
+                                          batch_id=batch_no)
+                update_record(connect_db, all_recs,
+                              MD_DIR_TABLE, cpso_no)
+
+                save_commit_state = connect_db.autocommit
+                connect_db.autocommit = False
+                for s in FINAL_SQL:
+                    curs.execute(s, (cpso_no,))
+
+                connect_db.commit()
+                connect_db.autocommit = save_commit_state
+
+
+            finish_workload(connect_db, batch_no)
+            workload = request_workload(connect_db, random=USE_RANDOM,
+                                        batch_size=BATCH_SIZE,
+                                        min_val=CPSO_START,
+                                        max_val=CPSO_STOP)
+    curs.close()
     connect_db.close()

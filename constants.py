@@ -1,5 +1,6 @@
 BATCH_SIZE = 50
 USE_RANDOM = False
+SECONDS_TO_WAIT = 10
 
 SEARCH_SUBMIT_BUTTON = 'p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_AllDoctorsSearch$btnSubmit1'
 
@@ -248,3 +249,20 @@ FINAL_SQL = ["UPDATE MD_addresses "
              "d.district_no = adr.district_no "
              "WHERE d.cpso_no = ?"
              ]
+
+ABORT_SET_SQL = f"""\
+INSERT INTO {BATCH_HEAD_TBL} (batch_size, host)
+VALUES (-1, '{ABORT_ALL}')
+"""
+
+ABORT_DEL_SQL = f"""\
+DELETE FROM {BATCH_HEAD_TBL} WHERE batch_size < 0 AND host = '{ABORT_ALL}'
+"""
+
+CHECK_STOP_STATUS = f"""
+SELECT COUNT(*) as 'cnt'
+FROM MD_batch_header
+WHERE start_date >= CURDATE() - INTERVAL 12 HOUR 
+AND HOST <> '!!!ABORT_ALL'
+AND end_date IS null
+"""
