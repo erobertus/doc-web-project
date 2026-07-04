@@ -996,10 +996,30 @@ def run_sweep(conn: 'connection', http_session,
                     # place, is the batch item marked completed
                     update_detail_table(conn, cpso_no,
                                         batch_id=batch_no)
-            except mariadb.Error:
-                # connection-level trouble: let the agent's
-                # reconnect logic (or the operator) handle it
-                raise
+            except mariadb.Error as e:
+                # distinguish data-level errors (collation
+                # conflicts, values a column cannot hold, ...)
+                # from a lost connection: only the latter must
+                # abort the sweep
+                try:
+                    probe = conn.cursor()
+                    probe.execute('SELECT 1')
+                    probe.fetchone()
+                except mariadb.Error:
+                    # connection is gone: let the agent's
+                    # reconnect logic (or the operator) handle it
+                    raise
+                try:
+                    conn.rollback()
+                except mariadb.Error:
+                    pass
+                print(f'({batch_no}) CPSO {cpso_no}: '
+                      f'database error: {e} - skipped, will '
+                      f'be re-scraped in a later run')
+                DB_LOG.log('ERROR',
+                           f'database error: '
+                           f'{traceback.format_exc()}',
+                           cpso_no=cpso_no, batch_uno=batch_no)
             except Exception as e:
                 # one broken doctor must not kill an unattended
                 # sweep: log centrally, leave the number
