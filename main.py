@@ -798,7 +798,11 @@ def process_record(conn: 'connection', cur_CPSO: int,
                              C_ADDR_COUNTRY,
                              C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
 
-    update_detail_table(conn, cur_CPSO, batch_id=batch_id)
+    # NOTE: the batch item is deliberately NOT marked completed
+    # here - the caller does that after update_record/FINAL_SQL
+    # succeed, so a crash mid-write leaves the number unclaimed
+    # and the next run re-scrapes it (the full-replace write
+    # makes the retry idempotent)
 
     return [record]
 
@@ -895,6 +899,12 @@ def run_sweep(conn: 'connection', http_session,
 
                 conn.commit()
                 conn.autocommit = save_commit_state
+
+                # the 'super-transaction' commit: only now, with
+                # every write for this CPSO number in place, is
+                # the batch item marked completed
+                update_detail_table(conn, cpso_no,
+                                    batch_id=batch_no)
 
             processed += 1
 
