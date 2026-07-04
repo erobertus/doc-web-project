@@ -27,9 +27,17 @@ class DbLogger:
 
     def __init__(self):
         self.enabled = False
+        self.verbose = False
         self.conn = None
         self.params = None
         self.host = socket.gethostname()
+
+    def debug(self, message, cpso_no=None, batch_uno=None):
+        """Per-doctor detail rows; written only in verbose mode
+        (log_verbose control column / --verbose-log)."""
+        if self.verbose:
+            self.log('DEBUG', message, cpso_no=cpso_no,
+                     batch_uno=batch_uno)
 
     def init(self, **conn_params):
         self.params = conn_params
@@ -675,16 +683,18 @@ def process_record_quick(conn: 'connection', cur_CPSO: int,
 
     record = {C_CPSO_NO: cur_CPSO, MD_ADDR_TABLE: addr_recs}
     record.update(upd)
-    print(f'({batch_id}) [quick]',
-          print_rec(record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
-                             C_ADDR_PREFIX + '1',
-                             C_ADDR_PREFIX + '2',
-                             C_ADDR_PREFIX + '3',
-                             C_ADDR_PREFIX + '4',
-                             C_ADDR_CITY,
-                             C_ADDR_PROV, C_ADDR_POSTAL,
-                             C_ADDR_COUNTRY,
-                             C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
+    summary = '[quick] ' + print_rec(
+        record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
+                 C_ADDR_PREFIX + '1',
+                 C_ADDR_PREFIX + '2',
+                 C_ADDR_PREFIX + '3',
+                 C_ADDR_PREFIX + '4',
+                 C_ADDR_CITY,
+                 C_ADDR_PROV, C_ADDR_POSTAL,
+                 C_ADDR_COUNTRY,
+                 C_ADDR_PHONE_NO, C_ADDR_FAX_NO))
+    print(f'({batch_id})', summary)
+    DB_LOG.debug(summary, cpso_no=cur_CPSO, batch_uno=batch_id)
 
     update_detail_table(conn, cur_CPSO, batch_id=batch_id)
     return []
@@ -858,16 +868,18 @@ def process_record(conn: 'connection', cur_CPSO: int,
     update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
                    C_LANG_CODE, record[MD_LANG_TABLE])
 
-    print(f'({batch_id}) ',
-          print_rec(record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
-                             C_ADDR_PREFIX + '1',
-                             C_ADDR_PREFIX + '2',
-                             C_ADDR_PREFIX + '3',
-                             C_ADDR_PREFIX + '4',
-                             C_ADDR_CITY,
-                             C_ADDR_PROV, C_ADDR_POSTAL,
-                             C_ADDR_COUNTRY,
-                             C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
+    summary = print_rec(record,
+                        (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
+                         C_ADDR_PREFIX + '1',
+                         C_ADDR_PREFIX + '2',
+                         C_ADDR_PREFIX + '3',
+                         C_ADDR_PREFIX + '4',
+                         C_ADDR_CITY,
+                         C_ADDR_PROV, C_ADDR_POSTAL,
+                         C_ADDR_COUNTRY,
+                         C_ADDR_PHONE_NO, C_ADDR_FAX_NO))
+    print(f'({batch_id}) ', summary)
+    DB_LOG.debug(summary, cpso_no=cur_CPSO, batch_uno=batch_id)
 
     # NOTE: the batch item is deliberately NOT marked completed
     # here - the caller does that after update_record/FINAL_SQL
@@ -1061,6 +1073,8 @@ def read_control(conn: 'connection'):
     # machine's local timezone is set.
     variants = (
         (f'{base_cols}, abort_check, run_from, run_until, '
+         f'interval_days, log_verbose+0, CURTIME()', 'verbose'),
+        (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, CURTIME()', 'interval'),
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'CURTIME()', 'window'),
@@ -1103,15 +1117,18 @@ def read_control(conn: 'connection'):
            'run_from': None,
            'run_until': None,
            'interval': None,
+           'log_verbose': None,
            'now': row[-1]}
 
-    if level in ('abort_check', 'window', 'interval'):
+    if level in ('abort_check', 'window', 'interval', 'verbose'):
         ctl['abort_check'] = row[8]
-    if level in ('window', 'interval'):
+    if level in ('window', 'interval', 'verbose'):
         ctl['run_from'] = row[9]
         ctl['run_until'] = row[10]
-    if level == 'interval':
+    if level in ('interval', 'verbose'):
         ctl['interval'] = row[11]
+    if level == 'verbose':
+        ctl['log_verbose'] = bool(row[12])
 
     ctl['in_window'] = in_time_window(ctl['now'],
                                       ctl['run_from'],
@@ -1175,6 +1192,10 @@ def run_agent(args, conn: 'connection'):
                                >= AGENT_RESWEEP_SECS)
                 if ctl['updated'] != completed_marker \
                         or resweep_due:
+                    DB_LOG.verbose = (
+                        ctl['log_verbose']
+                        if ctl['log_verbose'] is not None
+                        else args.verbose_log)
                     print(f"Agent: go! quick={ctl['quick']} "
                           f"range={ctl['cpso_start']}-"
                           f"{ctl['cpso_stop']} "
@@ -1311,6 +1332,15 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--abort',
                         action='store_true',
                         help='request abort of all running scrapes')
+    parser.add_argument('-v', '--verbose-log',
+                        action='store_true',
+                        help='also write each doctor\'s summary '
+                             'line to the central log table as '
+                             'DEBUG rows (default: only '
+                             'lifecycle, warnings and errors go '
+                             'to the central log); in agent mode '
+                             'the log_verbose control column '
+                             'takes precedence')
     parser.add_argument('-i', '--interval', type=int,
                         default=DEFAULT_INTERVAL_DAYS,
                         metavar='DAYS',
@@ -1385,6 +1415,7 @@ if __name__ == '__main__':
                 host=args.db_host,
                 port=args.db_port,
                 database=args.db_name)
+    DB_LOG.verbose = args.verbose_log
 
     # Connect to MariaDB Platform
     try:

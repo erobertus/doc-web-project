@@ -16,7 +16,9 @@ ALTER TABLE MD_scrape_control
   ADD COLUMN abort_check   INT  DEFAULT 0  AFTER use_random,
   ADD COLUMN run_from      TIME NULL       AFTER abort_check,
   ADD COLUMN run_until     TIME NULL       AFTER run_from,
-  ADD COLUMN interval_days INT  DEFAULT 20 AFTER run_until;
+  ADD COLUMN interval_days INT  DEFAULT 20 AFTER run_until,
+  ADD COLUMN log_verbose   BIT NOT NULL DEFAULT b'0'
+      AFTER interval_days;
 
 -- make sure there is exactly one control row and it says STOP
 SELECT * FROM MD_scrape_control;
@@ -202,7 +204,13 @@ ORDER BY log_time DESC;
 SELECT host, MAX(log_time) last_seen
 FROM MD_scrape_log GROUP BY host ORDER BY last_seen;
 
--- log housekeeping (run occasionally)
+-- per-doctor detail in the central log (DEBUG rows; a full
+-- sweep adds one row per doctor - turn off when not needed)
+UPDATE MD_scrape_control SET log_verbose = 1;   -- or 0
+
+-- log housekeeping (run occasionally; DEBUG rows first)
+DELETE FROM MD_scrape_log
+WHERE level = 'DEBUG' AND log_time < NOW() - INTERVAL 7 DAY;
 DELETE FROM MD_scrape_log
 WHERE log_time < NOW() - INTERVAL 60 DAY;
 

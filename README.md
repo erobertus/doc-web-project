@@ -151,6 +151,7 @@ CREATE TABLE MD_scrape_control (
   run_from    TIME NULL,
   run_until   TIME NULL,
   interval_days INT DEFAULT 20,
+  log_verbose BIT NOT NULL DEFAULT b'0',
   updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
               ON UPDATE CURRENT_TIMESTAMP
 );
