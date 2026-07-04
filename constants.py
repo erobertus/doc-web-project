@@ -12,7 +12,10 @@ DEFAULT_DELAY = 1.0
 # inserting a duplicate under the new name, so that existing codes
 # (and the scripts that rely on them) keep working.
 REG_STAT_ALIASES = {'Active': 'Active Member',
-                    'Deceased': 'Expired: Member deceased'}
+                    'Deceased': 'Expired: Member deceased',
+                    'Expired: Committee Terms & Conditions '
+                    'by Registration Committee':
+                        'Expired: Committee terms and conditions'}
 GENDER_ALIASES = {'Man': 'Male', 'Woman': 'Female'}
 
 # fallback when the register shows no gender (the z847e_MD_dir
