@@ -179,6 +179,11 @@ def update_x_table(in_db: 'connection', table: str,
     in_db.autocommit = False
     curs = in_db.cursor()
 
+    # the new register may list the same value twice (e.g. one
+    # hospital-privilege row per appointment); a duplicate code
+    # would violate the unique (key, value) index
+    values = list(dict.fromkeys(values))
+
     str_list = ', '.join([str(s) for s in values])
     attempt = 1
     tryagain = True
@@ -715,7 +720,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
         lang_codes.append(retrieve_code_from_name(
             language, db_languages, conn,
             LANGUAGE_TABLE, C_LANG_CODE, C_LANG_NAME))
-    record[MD_LANG_TABLE] = lang_codes
+    record[MD_LANG_TABLE] = list(dict.fromkeys(lang_codes))
 
     if parsed['medical_school']:
         record[C_UNIV_CODE] = retrieve_code_from_name(
@@ -739,7 +744,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
         jur_codes.append(retrieve_code_from_name(
             jurisdiction, db_reg_jurisdic, conn,
             REG_JUR_TABLE, C_JUR_CODE, C_JUR_NAME))
-    record[MD_REG_JURISDIC] = jur_codes
+    record[MD_REG_JURISDIC] = list(dict.fromkeys(jur_codes))
 
     record[MD_ADDR_TABLE] = process_address(
         conn, parsed['locations'])
@@ -756,7 +761,8 @@ def process_record(conn: 'connection', cur_CPSO: int,
             spec_dict[C_STYPE_CODE] = retrieve_code_from_name(
                 spec['certifying_body'], db_spec_types, conn,
                 STYPE_TABLE, C_STYPE_CODE, C_STYPE_NAME)
-        spec_list.append(spec_dict)
+        if spec_dict not in spec_list:
+            spec_list.append(spec_dict)
 
     record[MD_SPEC_TABLE] = spec_list
 
@@ -776,7 +782,7 @@ def process_record(conn: 'connection', cur_CPSO: int,
             WEB_NO_HOSP, db_hospitals, conn,
             HOSP_TABLE, C_HOSP_CODE, C_HOSP_NAME))
 
-    record[MD_HOSP_TABLE] = hosp_list
+    record[MD_HOSP_TABLE] = list(dict.fromkeys(hosp_list))
 
     update_x_table(conn, MD_LANG_TABLE, C_CPSO_NO, cur_CPSO,
                    C_LANG_CODE, record[MD_LANG_TABLE])
