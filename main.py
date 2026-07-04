@@ -567,6 +567,12 @@ def process_record(conn: 'connection', cur_CPSO: int,
     if parsed['date_of_death']:
         record[C_DATE_OF_DEATH] = reformat_date(
             parsed['date_of_death'])
+    elif parsed['status'] == DECEASED_STAT \
+            and parsed['status_date']:
+        # the new register shows no separate 'Date of Death'
+        # field; the 'Deceased as of ...' date is the death date
+        record[C_DATE_OF_DEATH] = reformat_date(
+            parsed['status_date'])
 
     jur_codes = []
     for jurisdiction in parsed['jurisdictions']:
@@ -692,14 +698,18 @@ if __name__ == '__main__':
                              f'(default={DEFAULT_DELAY})')
     parser.add_argument('--perm-exclude',
                         action='store_true',
-                        help='permanently exclude CPSO numbers '
-                             'that are not found on the register '
-                             '(old behaviour). By default they '
-                             'are only marked completed and will '
-                             'be re-checked on the next run, '
-                             'because the new register purges '
-                             'deceased doctors and numbers may '
-                             'be issued to new doctors later')
+                        help='permanently exclude ALL CPSO '
+                             'numbers that are not found on the '
+                             'register. By default only numbers '
+                             'BELOW the highest CPSO number '
+                             'already in the database are '
+                             'excluded (CPSO numbers are ever-'
+                             'increasing, so gaps between '
+                             'existing doctors are never filled '
+                             'in); numbers above it are re-'
+                             'checked on the next run because '
+                             'they may be issued to newly '
+                             'registered doctors')
     args = parser.parse_args()
 
     # Connect to MariaDB Platform
@@ -759,6 +769,17 @@ if __name__ == '__main__':
     else:
         http_session = make_session()
 
+        # CPSO numbers are ever-increasing; a missing number below
+        # the highest one we have ever seen is a permanent gap,
+        # while a missing number above it may belong to a future
+        # newly registered doctor
+        curs.execute(f'SELECT COALESCE(MAX({C_CPSO_NO}), 0) '
+                     f'FROM {MD_DIR_TABLE}')
+        known_max_cpso = curs.fetchone()[0]
+        print(f"Highest CPSO number in database: {known_max_cpso} "
+              f"(missing numbers below it are excluded "
+              f"permanently)")
+
         workload = request_workload(connect_db, random=USE_RANDOM,
                                     batch_size=BATCH_SIZE,
                                     min_val=CPSO_START,
@@ -775,7 +796,8 @@ if __name__ == '__main__':
                 all_recs = process_record(
                     connect_db, cpso_no,
                     batch_id=batch_no,
-                    exclude_invalid=args.perm_exclude,
+                    exclude_invalid=(args.perm_exclude or
+                                     cpso_no <= known_max_cpso),
                     session=http_session)
 
                 if len(all_recs) > 0:

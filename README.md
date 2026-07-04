@@ -64,25 +64,32 @@ lines so nothing is lost; the geocode probe deals with them.
 
 ### Behaviour changes vs. the old scraper
 
-1. **Doctors purged from the register.** The new register removes
-   deceased doctors and some historical records entirely (the old
-   site kept listing them as inactive). When a previously known
-   CPSO number is no longer found, the row in `z847e_MD_dir` is
-   **kept** and its `reg_stat_code` is set to the
-   `Not on Register` status (auto-created in
-   `z847e_MD_reg_statuses` on first use); nothing else is touched.
-2. **Not-found numbers are no longer permanently excluded by
-   default** — they are marked completed for the current run and
-   re-checked on the next run, because a "missing" number may be
-   issued to a new doctor later. Pass `--perm-exclude` to restore
-   the old permanent exclusion.
+1. **Deceased doctors** stay on the register (e.g. CPSO 79082)
+   with the banner status `Deceased as of <date>`. That maps to
+   the existing `Expired: Member deceased` status via
+   `REG_STAT_ALIASES`, and the "as of" date is stored as
+   `date_of_death` (the new site has no separate Date of Death
+   field). Some historical records are still purged entirely
+   (e.g. CPSO 10310): those rows are **kept** in `z847e_MD_dir`
+   and flagged with the `Not on Register` status (auto-created on
+   first use); nothing else is touched.
+2. **Smarter permanent exclusion.** CPSO numbers are
+   ever-increasing and gaps are never re-issued, so a number that
+   is not found and lies *below* the highest CPSO number already
+   in the database is permanently excluded (as before). Numbers
+   *above* the database maximum are only marked completed for the
+   current run and re-checked next run — they may belong to
+   doctors registered after this run. `--perm-exclude` forces the
+   old exclude-everything behaviour.
 3. **Renamed reference values.** The new site says `Active` where
-   the old one said `Active Member`, and `Man`/`Woman` instead of
+   the old one said `Active Member`, `Deceased` instead of
+   `Expired: Member deceased`, and `Man`/`Woman` instead of
    `Male`/`Female`. `REG_STAT_ALIASES` / `GENDER_ALIASES` in
    `constants.py` reuse the existing reference codes when the old
    name is already present in the table, so existing
    `reg_stat_code` values keep their meaning. Reference-name
-   lookups are also case-insensitive now.
+   lookups are also case-insensitive now. Note: former names now
+   arrive with a suffix like `(Used Until: 26 Aug 2008)`.
 4. **Specialty types** are now the certifying body
    ("Royal College of Physicians and Surgeons of Canada", ...) —
    the old site's specialty-type wording no longer exists. New

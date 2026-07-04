@@ -11,8 +11,13 @@ DEFAULT_DELAY = 1.0
 # exists in the reference table, the alias below is used instead of
 # inserting a duplicate under the new name, so that existing codes
 # (and the scripts that rely on them) keep working.
-REG_STAT_ALIASES = {'Active': 'Active Member'}
+REG_STAT_ALIASES = {'Active': 'Active Member',
+                    'Deceased': 'Expired: Member deceased'}
 GENDER_ALIASES = {'Man': 'Male', 'Woman': 'Female'}
+
+# status shown by the new register for deceased doctors; their
+# "as of" date is the date of death
+DECEASED_STAT = 'Deceased'
 
 # status recorded for doctors that used to exist but are no longer
 # on the register at all (the new register purges deceased doctors
