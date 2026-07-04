@@ -42,6 +42,21 @@ CREATE TABLE IF NOT EXISTS MD_scrape_log (
   KEY idx_cpso  (cpso_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- ONE-TIME charset conversion: the new register serves proper
+-- Unicode (e.g. Riga Stradins with macrons), which the legacy
+-- latin1 tables can neither compare against nor store. Run once
+-- while no scrapers are active; latin1 -> utf8mb4 is lossless.
+ALTER TABLE z847e_MD_universities     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_hospitals        CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_reg_jurisdiction CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_languages        CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_reg_classes      CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_reg_statuses     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_spec_list        CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE z847e_MD_spec_types       CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+-- ~1M rows, several minutes, locks the table:
+ALTER TABLE MD_addresses              CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+
 -- clear any leftover abort flag / stale open batches
 DELETE FROM MD_batch_header
 WHERE host = '!!!ABORT_ALL' AND batch_size < 0;
