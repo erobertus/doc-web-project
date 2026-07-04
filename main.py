@@ -796,15 +796,46 @@ def process_record(conn: 'connection', cur_CPSO: int,
     return [record]
 
 
+def check_abort_requested(conn: 'connection') -> bool:
+    """True when an --abort flag row is present (same check
+    request_workload performs at the start of every batch)."""
+    curs = conn.cursor()
+    curs.execute(f'SELECT COUNT(*) FROM {BATCH_HEAD_TBL} '
+                 f'WHERE host = "{ABORT_ALL}" '
+                 f'AND batch_size < 0')
+    (cnt,) = curs.fetchone()
+    # end the read snapshot so the next check sees fresh data
+    conn.commit()
+    return cnt > 0
+
+
+def release_unfinished(conn: 'connection', batch_id):
+    """Return the unprocessed numbers of a batch to the pool by
+    backdating their claim stamp, so the next run can pick them
+    up immediately instead of after the freshness interval."""
+    curs = conn.cursor()
+    curs.execute(f'UPDATE {BATCH_DET_TBL} '
+                 f'SET updated_date_time = '
+                 f'NOW() - INTERVAL 30 DAY '
+                 f'WHERE batch_uno = ? AND NOT isCompleted',
+                 (batch_id,))
+    conn.commit()
+
+
 def run_sweep(conn: 'connection', http_session,
               cpso_start: int, cpso_stop: int, batch_size: int,
               use_random=True, descending=False,
               delay=DEFAULT_DELAY, quick=False,
-              perm_exclude=False, control_check=None) -> int:
+              perm_exclude=False, control_check=None,
+              check_every=0) -> int:
     """Work the CPSO number pool until it is exhausted. When
     control_check is given it is consulted between batches; a
-    falsy result stops the sweep after the current batch.
-    Returns the number of doctors processed."""
+    falsy result stops the sweep after the current batch. With
+    check_every > 0 the abort flag (and the control check, in
+    agent mode) is also consulted after every check_every doctors
+    WITHIN a batch; on a stop the batch's unprocessed numbers are
+    released back to the pool. Returns the number of doctors
+    processed."""
     curs = conn.cursor()
 
     # CPSO numbers are ever-increasing; a missing number below
@@ -818,6 +849,7 @@ def run_sweep(conn: 'connection', http_session,
           f"(missing numbers below it are excluded permanently)")
 
     processed = 0
+    stopping = False
     scrape_one = process_record_quick if quick \
         else process_record
 
@@ -834,7 +866,7 @@ def run_sweep(conn: 'connection', http_session,
               f"({cpso_start}-{cpso_stop}:{batch_size})\n"
               f"======================================")
 
-        for cpso_no in workload[1]:
+        for (done, cpso_no) in enumerate(workload[1], start=1):
             all_recs = scrape_one(
                 conn, cpso_no,
                 batch_id=batch_no,
@@ -855,10 +887,27 @@ def run_sweep(conn: 'connection', http_session,
                 conn.autocommit = save_commit_state
 
             processed += 1
+
+            if check_every > 0 and done % check_every == 0 \
+                    and done < len(workload[1]):
+                if check_abort_requested(conn) or \
+                        (control_check is not None
+                         and not control_check()):
+                    remaining = len(workload[1]) - done
+                    print(f'Stop requested - releasing '
+                          f'{remaining} unfinished number(s) '
+                          f'of batch {batch_no}.')
+                    release_unfinished(conn, batch_no)
+                    stopping = True
+                    break
+
             if delay > 0:
                 time.sleep(delay)
 
         finish_workload(conn, batch_no)
+
+        if stopping:
+            break
 
         if control_check is not None and not control_check():
             print('Go flag cleared - stopping this sweep.')
@@ -951,7 +1000,8 @@ def run_agent(args, conn: 'connection'):
                         quick=ctl['quick'],
                         control_check=lambda:
                             (read_control(conn) or {})
-                            .get('go', False))
+                            .get('go', False),
+                        check_every=args.abort_check)
 
                     after = read_control(conn)
                     if after is not None and after['go']:
@@ -1053,6 +1103,16 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--abort',
                         action='store_true',
                         help='request abort of all running scrapes')
+    parser.add_argument('-c', '--abort-check', type=int,
+                        default=0, metavar='N',
+                        help='also check for an abort request '
+                             '(and the go flag in agent mode) '
+                             'after every N doctors WITHIN a '
+                             'batch; unprocessed numbers of the '
+                             'interrupted batch are released '
+                             'back to the pool immediately '
+                             '(default 0 = check only between '
+                             'batches)')
     parser.add_argument('--agent',
                         action='store_true',
                         help='unattended fleet mode: poll the '
@@ -1168,6 +1228,7 @@ if __name__ == '__main__':
                   descending=args.descending,
                   delay=args.delay,
                   quick=args.quick,
-                  perm_exclude=args.perm_exclude)
+                  perm_exclude=args.perm_exclude,
+                  check_every=args.abort_check)
     curs.close()
     connect_db.close()
