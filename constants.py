@@ -15,6 +15,10 @@ REG_STAT_ALIASES = {'Active': 'Active Member',
                     'Deceased': 'Expired: Member deceased'}
 GENDER_ALIASES = {'Man': 'Male', 'Woman': 'Female'}
 
+# fallback when the register shows no gender (the z847e_MD_dir
+# column is NOT NULL); already present in MD_genders as code 3
+GENDER_UNKNOWN = 'Unknown'
+
 # status shown by the new register for deceased doctors; their
 # "as of" date is the date of death
 DECEASED_STAT = 'Deceased'

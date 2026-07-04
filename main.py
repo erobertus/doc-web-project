@@ -111,12 +111,15 @@ def process_address(conn_db: 'connection', locations: list) -> list:
             addr_dict[C_ADDR_PREFIX + '1'] = NO_ADDR
         else:
             lines = address['lines']
+            # address_1 is NOT NULL in MD_addresses; an address
+            # may consist of a locality line only
+            addr_dict[C_ADDR_PREFIX + '1'] = BLANK
             for j in range(min(len(lines), 4)):
                 if j == 3 and len(lines) > 4:
                     # never lose data: fold the overflow into
-                    # the last address line
+                    # the last address line (varchar(200))
                     addr_dict[C_ADDR_PREFIX + '4'] = \
-                        ', '.join(lines[3:])
+                        ', '.join(lines[3:])[:200]
                 else:
                     addr_dict[C_ADDR_PREFIX + str(j + 1)] = lines[j]
 
@@ -544,11 +547,12 @@ def process_record(conn: 'connection', cur_CPSO: int,
     if parsed['former_name']:
         record[C_FRMR_NAME] = parsed['former_name']
 
-    if parsed['gender']:
-        record[C_MD_GENDER] = retrieve_code_from_name(
-            parsed['gender'], db_genders, conn,
-            GENDER_TABLE, C_GENDER_CODE, C_GENDER_NAME,
-            aliases=GENDER_ALIASES)
+    # gender is NOT NULL in z847e_MD_dir; fall back to 'Unknown'
+    # (an existing code in MD_genders) when the site has none
+    record[C_MD_GENDER] = retrieve_code_from_name(
+        parsed['gender'] or GENDER_UNKNOWN, db_genders, conn,
+        GENDER_TABLE, C_GENDER_CODE, C_GENDER_NAME,
+        aliases=GENDER_ALIASES)
 
     lang_codes = []
     for language in parsed['languages']:
