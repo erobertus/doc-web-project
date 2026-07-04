@@ -1,0 +1,202 @@
+# Clinic fleet rollout — CPSO scrape agents
+
+Goal: every clinic machine runs one unattended agent that polls
+`MD_scrape_control` and scrapes only when told to. You control the
+whole fleet from one row in the database.
+
+---
+
+## 0. One-time database prep (run once, from anywhere)
+
+Skip any ALTER you have already applied.
+
+```sql
+-- control-table columns added over time
+ALTER TABLE MD_scrape_control
+  ADD COLUMN abort_check   INT  DEFAULT 0  AFTER use_random,
+  ADD COLUMN run_from      TIME NULL       AFTER abort_check,
+  ADD COLUMN run_until     TIME NULL       AFTER run_from,
+  ADD COLUMN interval_days INT  DEFAULT 20 AFTER run_until;
+
+-- make sure there is exactly one control row and it says STOP
+SELECT * FROM MD_scrape_control;
+-- if empty:
+INSERT INTO MD_scrape_control (go_flag) VALUES (0);
+UPDATE MD_scrape_control SET go_flag = 0;
+
+-- clear any leftover abort flag / stale open batches
+DELETE FROM MD_batch_header
+WHERE host = '!!!ABORT_ALL' AND batch_size < 0;
+
+UPDATE MD_batch_details d
+JOIN MD_batch_header h ON d.batch_uno = h.batch_uno
+SET d.updated_date_time = NOW() - INTERVAL 30 DAY
+WHERE NOT d.isCompleted AND h.end_date IS NULL;
+
+UPDATE MD_batch_header
+SET InProgress = 0, end_date = NOW(), status_date = NOW()
+WHERE end_date IS NULL;
+```
+
+Recommended starting parameters (nightly quick refresh):
+
+```sql
+UPDATE MD_scrape_control SET
+  quick_mode  = 1,
+  cpso_start  = 10000,
+  cpso_stop   = 200000,
+  batch_size  = 50,
+  delay_sec   = 1.0,
+  use_random  = 1,
+  abort_check = 10,
+  run_from    = '19:00:00',
+  run_until   = '06:30:00',
+  interval_days = 20,
+  go_flag     = 0;          -- keep OFF until the pilot passes
+```
+
+---
+
+## 1. Per-machine install (each clinic PC)
+
+1. **Python 3.10+** — install from python.org, tick
+   **"Add python.exe to PATH"**. Verify in a new cmd window:
+   `python --version`
+2. **Get the code** (note the branch — the repo default is stale):
+   ```
+   cd C:\
+   git clone -b geocode_on_the_fly https://github.com/erobertus/doc-web-project.git cpso
+   ```
+   No git on the machine? Copy the project folder from a USB
+   stick / network share instead — just keep it at a fixed path
+   like `C:\cpso`.
+3. **Dependencies**:
+   ```
+   cd C:\cpso
+   pip install -r requirements.txt
+   ```
+   If `mariadb` fails to install, install the
+   "Microsoft Visual C++ Redistributable (x64)" and retry.
+4. **Connectivity check** (go_flag is still 0, so nothing is
+   scraped — you should see it polling and staying idle):
+   ```
+   python main.py --agent --poll-interval 15
+   ```
+   Wait ~20 s, confirm `Agent mode: polling MD_scrape_control...`
+   and no database errors, then Ctrl-C.
+   - Database error here = the machine cannot reach
+     `faxcomet.com:3306` (clinic firewall) — fix before
+     continuing.
+5. **Schedule it** (admin cmd window):
+   ```
+   schtasks /create /tn "CPSO scrape agent" /sc onstart ^
+     /tr "C:\cpso\run_agent.bat" /ru SYSTEM
+   schtasks /run /tn "CPSO scrape agent"
+   ```
+   The agent now runs headless, survives reboots, restarts itself
+   after crashes, and logs everything to `C:\cpso\agent.log`.
+
+Repeat on the next machine. Machines are identical — no
+per-machine configuration.
+
+---
+
+## 2. Pilot (one machine, ~15 minutes)
+
+With ONE machine's agent running and the rest not installed yet:
+
+```sql
+-- small test range, immediate window, full-detail mode
+UPDATE MD_scrape_control SET
+  quick_mode = 0, cpso_start = 94200, cpso_stop = 94400,
+  batch_size = 20, run_from = NULL, run_until = NULL,
+  go_flag = 1;
+```
+
+Within `poll_interval` (2 min default) the agent starts. Check:
+
+```sql
+-- is it working?
+SELECT batch_uno, host, start_date, end_date
+FROM MD_batch_header
+ORDER BY batch_uno DESC LIMIT 5;
+
+-- results arriving?
+SELECT COUNT(*) FROM MD_batch_details
+WHERE updated_date_time >= NOW() - INTERVAL 10 MINUTE
+  AND isCompleted;
+```
+
+Also glance at `C:\cpso\agent.log` on the machine.
+
+Then test the brakes:
+
+```sql
+UPDATE MD_scrape_control SET go_flag = 0;
+```
+
+The agent should stop within ~`abort_check × delay_sec` seconds
+(log: "Stop requested - releasing ..."). If all good:
+
+```sql
+-- restore production parameters (section 0) and leave go_flag=0
+```
+
+Roll out to the remaining machines, then flip `go_flag = 1` in
+the evening and let the window take over.
+
+---
+
+## 3. Day-to-day operations cheat sheet
+
+```sql
+-- START the fleet (within the daily window)
+UPDATE MD_scrape_control SET go_flag = 1;
+
+-- STOP the fleet (acts within abort_check doctors per agent)
+UPDATE MD_scrape_control SET go_flag = 0;
+
+-- switch nightly refresh <-> full detail sweep
+UPDATE MD_scrape_control SET quick_mode = 1;   -- or 0
+
+-- discovery pass for NEW doctors (sequential over the top range)
+UPDATE MD_scrape_control SET use_random = 0,
+  cpso_start = 154000, cpso_stop = 200000;
+
+-- who is working right now (last 24 h, per machine)
+SELECT host, COUNT(*) batches, MAX(start_date) last_start,
+       SUM(end_date IS NULL) open_batches
+FROM MD_batch_header
+WHERE start_date >= NOW() - INTERVAL 1 DAY
+  AND host <> '!!!ABORT_ALL'
+GROUP BY host;
+
+-- progress today
+SELECT COUNT(*) done_today FROM MD_batch_details
+WHERE updated_date_time >= CURDATE() AND isCompleted;
+
+-- emergency stop of everything (old mechanism, still works)
+--   on any machine:  python main.py -a
+```
+
+Notes:
+
+- Changes to parameters take effect at each agent's **next
+  sweep**; `go_flag` (and the run window) act **mid-sweep** at
+  the `abort_check` cadence.
+- Leaving `go_flag = 1` permanently is the intended standing
+  mode: agents sweep nightly inside the window and only touch
+  doctors older than `interval_days`.
+- `agent.log` grows slowly; delete it any time, the agent
+  recreates it.
+
+## 4. Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `pip install mariadb` fails | Install MS Visual C++ Redistributable x64, retry |
+| Agent log: `cannot connect` loop | Clinic firewall blocks 3306 to faxcomet.com |
+| Agents idle though go_flag=1 | Outside run window? Check `SELECT CURTIME();` vs run_from/run_until (DB clock rules) |
+| Every agent stops immediately | Leftover abort row — `DELETE FROM MD_batch_header WHERE host='!!!ABORT_ALL' AND batch_size<0;` |
+| `--abort` waits forever | Stale open batches — cleanup SQL in section 0 |
+| Repeated `fetch failed (HTTP 403/429)` in logs | Cloudflare pushback: raise `delay_sec`, or narrow the window |
