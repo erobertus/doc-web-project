@@ -24,6 +24,22 @@ SELECT * FROM MD_scrape_control;
 INSERT INTO MD_scrape_control (go_flag) VALUES (0);
 UPDATE MD_scrape_control SET go_flag = 0;
 
+-- central fleet log (agents fall back to console-only if absent)
+CREATE TABLE IF NOT EXISTS MD_scrape_log (
+  log_uno   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  log_time  TIMESTAMP NOT NULL DEFAULT current_timestamp(),
+  host      VARCHAR(128) NOT NULL,
+  level     VARCHAR(8) NOT NULL DEFAULT 'INFO',
+  batch_uno INT NULL DEFAULT NULL,
+  cpso_no   INT NULL DEFAULT NULL,
+  message   TEXT NOT NULL,
+  PRIMARY KEY (log_uno),
+  KEY idx_time  (log_time),
+  KEY idx_level (level, log_time),
+  KEY idx_host  (host, log_time),
+  KEY idx_cpso  (cpso_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- clear any leftover abort flag / stale open batches
 DELETE FROM MD_batch_header
 WHERE host = '!!!ABORT_ALL' AND batch_size < 0;
@@ -174,6 +190,21 @@ GROUP BY host;
 -- progress today
 SELECT COUNT(*) done_today FROM MD_batch_details
 WHERE updated_date_time >= CURDATE() AND isCompleted;
+
+-- fleet errors/warnings, last 24 h (central log)
+SELECT log_time, host, level, cpso_no, LEFT(message, 200) msg
+FROM MD_scrape_log
+WHERE level IN ('ERROR', 'WARN')
+  AND log_time >= NOW() - INTERVAL 1 DAY
+ORDER BY log_time DESC;
+
+-- last sign of life per machine
+SELECT host, MAX(log_time) last_seen
+FROM MD_scrape_log GROUP BY host ORDER BY last_seen;
+
+-- log housekeeping (run occasionally)
+DELETE FROM MD_scrape_log
+WHERE log_time < NOW() - INTERVAL 60 DAY;
 
 -- emergency stop of everything (old mechanism, still works)
 --   on any machine:  python main.py -a

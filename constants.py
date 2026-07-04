@@ -11,6 +11,10 @@ DEFAULT_DELAY = 1.0
 # table's interval_days column)
 DEFAULT_INTERVAL_DAYS = 20
 
+# central fleet log table (best-effort; the program falls back to
+# console-only logging when the table does not exist)
+LOG_TBL = 'MD_scrape_log'
+
 # --agent mode: central control table and poll cadence
 CONTROL_TBL = 'MD_scrape_control'
 AGENT_POLL_SECS = 120

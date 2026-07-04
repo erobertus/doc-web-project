@@ -5,6 +5,8 @@
 import sys
 import mariadb
 import time
+import socket
+import traceback
 import argparse
 from time import sleep
 from datetime import timedelta
@@ -13,6 +15,63 @@ from GeoCoding import get_geocode_db_uno
 from cpso_site import (make_session, fetch_physician_page,
                        parse_physician_page, fetch_search_result,
                        search_result_location, CpsoFetchError)
+
+
+class DbLogger:
+    """Best-effort central logging into MD_scrape_log so all fleet
+    machines can be monitored from one place. Uses its OWN
+    autocommit connection - a log write can never interfere with
+    the scraper's transactions. Retries the connection once per
+    write, then disables itself (e.g. when the table does not
+    exist yet); scraping is never affected by logging problems."""
+
+    def __init__(self):
+        self.enabled = False
+        self.conn = None
+        self.params = None
+        self.host = socket.gethostname()
+
+    def init(self, **conn_params):
+        self.params = conn_params
+        self.enabled = True
+        self._connect(silent=False)
+
+    def _connect(self, silent=True) -> bool:
+        try:
+            self.conn = mariadb.connect(autocommit=True,
+                                        **self.params)
+            return True
+        except mariadb.Error as e:
+            if not silent:
+                print(f'Central log unavailable ({e}); '
+                      f'logging to console only.')
+            self.conn = None
+            return False
+
+    def log(self, level, message, cpso_no=None, batch_uno=None):
+        if not self.enabled:
+            return
+        for attempt in (1, 2):
+            if self.conn is None and not self._connect():
+                return
+            try:
+                curs = self.conn.cursor()
+                curs.execute(
+                    f'INSERT INTO {LOG_TBL} '
+                    f'(host, level, batch_uno, cpso_no, message) '
+                    f'VALUES (?, ?, ?, ?, ?)',
+                    (self.host, level, batch_uno, cpso_no,
+                     str(message)[:60000]))
+                return
+            except mariadb.Error as e:
+                self.conn = None      # reconnect once, then stop
+                if attempt == 2:
+                    self.enabled = False
+                    print(f'Central log disabled ({e}); '
+                          f'logging to console only.')
+
+
+DB_LOG = DbLogger()
 
 
 def reformat_date(cpso_date: str) -> str:
@@ -218,6 +277,9 @@ def update_x_table(in_db: 'connection', table: str,
             print(f'Most recent statement: \n{stmt}')
             print(f'Attempt: {attempt}. '
                   f'Waiting {retry_delay} seconds to retry.')
+            DB_LOG.log('WARN',
+                       f'{table} update attempt {attempt} '
+                       f'failed: {e}', cpso_no=key)
             time.sleep(retry_delay)
             tryagain = True
         except:
@@ -277,6 +339,9 @@ def update_record(in_db: 'connection', records: list,
                     result = curs.lastrowid
             except mariadb.Error as e:
                 print(f"!!! DB error: {e}")
+                DB_LOG.log('ERROR',
+                           f'{table} insert failed: {e}',
+                           cpso_no=key_val)
 
     in_db.commit()
     in_db.autocommit = save_commit_state
@@ -467,6 +532,8 @@ def flag_not_on_register(conn: 'connection', cur_CPSO: int,
     and only flag the status."""
     print(f'({batch_id}) CPSO: {cur_CPSO} - '
           f'not on the register.')
+    DB_LOG.log('INFO', 'not on the register',
+               cpso_no=cur_CPSO, batch_uno=batch_id)
 
     stat_code = retrieve_code_from_name(
         NOT_ON_REGISTER_STAT, db_statuses, conn,
@@ -508,6 +575,8 @@ def process_record_quick(conn: 'connection', cur_CPSO: int,
         data = fetch_search_result(session, cur_CPSO)
     except CpsoFetchError as e:
         print(f'({batch_id}) {e}')
+        DB_LOG.log('WARN', str(e), cpso_no=cur_CPSO,
+                   batch_uno=batch_id)
         return []
 
     results = data.get('results') or []
@@ -663,6 +732,8 @@ def process_record(conn: 'connection', cur_CPSO: int,
         # transient site problem: leave the batch item incomplete
         # so the number is retried in a later run
         print(f'({batch_id}) {e}')
+        DB_LOG.log('WARN', str(e), cpso_no=cur_CPSO,
+                   batch_uno=batch_id)
         return []
 
     parsed = parse_physician_page(html)
@@ -861,6 +932,13 @@ def run_sweep(conn: 'connection', http_session,
     print(f"Highest CPSO number in database: {known_max_cpso} "
           f"(missing numbers below it are excluded permanently)")
 
+    DB_LOG.log('INFO',
+               f'Sweep start: range {cpso_start}-{cpso_stop}, '
+               f'batch {batch_size}, quick={quick}, '
+               f'delay={delay}, random={use_random}, '
+               f'interval={interval}d, '
+               f'known_max={known_max_cpso}')
+
     processed = 0
     stopping = False
     scrape_one = process_record_quick if quick \
@@ -881,30 +959,46 @@ def run_sweep(conn: 'connection', http_session,
               f"======================================")
 
         for (done, cpso_no) in enumerate(workload[1], start=1):
-            all_recs = scrape_one(
-                conn, cpso_no,
-                batch_id=batch_no,
-                exclude_invalid=(perm_exclude or
-                                 cpso_no <= known_max_cpso),
-                session=http_session)
+            try:
+                all_recs = scrape_one(
+                    conn, cpso_no,
+                    batch_id=batch_no,
+                    exclude_invalid=(perm_exclude or
+                                     cpso_no <= known_max_cpso),
+                    session=http_session)
 
-            if len(all_recs) > 0:
-                update_record(conn, all_recs,
-                              MD_DIR_TABLE, cpso_no)
+                if len(all_recs) > 0:
+                    update_record(conn, all_recs,
+                                  MD_DIR_TABLE, cpso_no)
 
-                save_commit_state = conn.autocommit
-                conn.autocommit = False
-                for s in FINAL_SQL:
-                    curs.execute(s, (cpso_no,))
+                    save_commit_state = conn.autocommit
+                    conn.autocommit = False
+                    for s in FINAL_SQL:
+                        curs.execute(s, (cpso_no,))
 
-                conn.commit()
-                conn.autocommit = save_commit_state
+                    conn.commit()
+                    conn.autocommit = save_commit_state
 
-                # the 'super-transaction' commit: only now, with
-                # every write for this CPSO number in place, is
-                # the batch item marked completed
-                update_detail_table(conn, cpso_no,
-                                    batch_id=batch_no)
+                    # the 'super-transaction' commit: only now,
+                    # with every write for this CPSO number in
+                    # place, is the batch item marked completed
+                    update_detail_table(conn, cpso_no,
+                                        batch_id=batch_no)
+            except mariadb.Error:
+                # connection-level trouble: let the agent's
+                # reconnect logic (or the operator) handle it
+                raise
+            except Exception as e:
+                # one broken doctor must not kill an unattended
+                # sweep: log centrally, leave the number
+                # unmarked so a later run retries it, move on
+                print(f'({batch_no}) CPSO {cpso_no}: '
+                      f'unexpected error: {e} - skipped, will '
+                      f'be re-scraped in a later run')
+                DB_LOG.log('ERROR',
+                           f'unexpected error: '
+                           f'{traceback.format_exc()}',
+                           cpso_no=cpso_no, batch_uno=batch_no)
 
             processed += 1
 
@@ -917,6 +1011,10 @@ def run_sweep(conn: 'connection', http_session,
                     print(f'Stop requested - releasing '
                           f'{remaining} unfinished number(s) '
                           f'of batch {batch_no}.')
+                    DB_LOG.log('INFO',
+                               f'stop requested; released '
+                               f'{remaining} unfinished numbers',
+                               batch_uno=batch_no)
                     release_unfinished(conn, batch_no,
                                        interval=interval)
                     stopping = True
@@ -933,6 +1031,7 @@ def run_sweep(conn: 'connection', http_session,
         if control_check is not None and not control_check():
             print('Stop signal (go flag / run window) - '
                   'stopping this sweep.')
+            DB_LOG.log('INFO', 'stop signal between batches')
             break
 
         workload = request_workload(conn, random=use_random,
@@ -941,6 +1040,8 @@ def run_sweep(conn: 'connection', http_session,
                                     max_val=cpso_stop,
                                     desc=descending,
                                     interval=interval)
+
+    DB_LOG.log('INFO', f'Sweep finished: {processed} processed')
     return processed
 
 
@@ -1047,6 +1148,7 @@ def run_agent(args, conn: 'connection'):
 
     print(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
           f'every {args.poll_interval} sec. Ctrl-C to stop.')
+    DB_LOG.log('INFO', 'agent started')
 
     while True:
         try:
@@ -1129,6 +1231,9 @@ def run_agent(args, conn: 'connection'):
         except mariadb.Error as e:
             print(f'Agent: database error: {e}. '
                   f'Reconnecting in 60 sec...')
+            DB_LOG.log('WARN',
+                       f'agent database error, '
+                       f'reconnecting: {e}')
             try:
                 conn.close()
             except Exception:
@@ -1144,6 +1249,7 @@ def run_agent(args, conn: 'connection'):
                         database=args.db_name,
                         compress=True)
                     print('Agent: reconnected.')
+                    DB_LOG.log('INFO', 'agent reconnected')
                     break
                 except mariadb.Error as e2:
                     print(f'Agent: reconnect failed: {e2}; '
@@ -1272,6 +1378,13 @@ if __name__ == '__main__':
                              'they may be issued to newly '
                              'registered doctors')
     args = parser.parse_args()
+
+    # central fleet log (best-effort; falls back to console)
+    DB_LOG.init(user=args.db_user,
+                password=args.db_pass,
+                host=args.db_host,
+                port=args.db_port,
+                database=args.db_name)
 
     # Connect to MariaDB Platform
     try:
