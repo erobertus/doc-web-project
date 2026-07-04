@@ -927,14 +927,26 @@ def read_control(conn: 'connection'):
     cast to integers server-side so the connector returns plain
     numbers."""
     curs = conn.cursor()
+    base_cols = 'go_flag+0, quick_mode+0, cpso_start, ' \
+                'cpso_stop, batch_size, delay_sec, ' \
+                'use_random+0, updated'
     try:
-        curs.execute(
-            f'SELECT go_flag+0, quick_mode+0, cpso_start, '
-            f'cpso_stop, batch_size, delay_sec, use_random+0, '
-            f'updated '
-            f'FROM {CONTROL_TBL} '
-            f'ORDER BY control_uno DESC LIMIT 1')
-        row = curs.fetchone()
+        try:
+            curs.execute(
+                f'SELECT {base_cols}, abort_check '
+                f'FROM {CONTROL_TBL} '
+                f'ORDER BY control_uno DESC LIMIT 1')
+            row = curs.fetchone()
+            has_abort_check = True
+        except mariadb.Error:
+            # control table created before the abort_check column
+            # was introduced - fall back to the CLI value
+            curs.execute(
+                f'SELECT {base_cols} '
+                f'FROM {CONTROL_TBL} '
+                f'ORDER BY control_uno DESC LIMIT 1')
+            row = curs.fetchone()
+            has_abort_check = False
     finally:
         # leave the read snapshot behind so the next poll sees
         # fresh data (REPEATABLE READ would keep serving the old
@@ -952,7 +964,9 @@ def read_control(conn: 'connection'):
             'delay': float(row[5]) if row[5] is not None
                      else DEFAULT_DELAY,
             'random': bool(row[6]),
-            'updated': row[7]}
+            'updated': row[7],
+            'abort_check': (row[8] if has_abort_check
+                            and row[8] is not None else None)}
 
 
 def run_agent(args, conn: 'connection'):
@@ -1001,7 +1015,10 @@ def run_agent(args, conn: 'connection'):
                         control_check=lambda:
                             (read_control(conn) or {})
                             .get('go', False),
-                        check_every=args.abort_check)
+                        check_every=(
+                            ctl['abort_check']
+                            if ctl['abort_check'] is not None
+                            else args.abort_check))
 
                     after = read_control(conn)
                     if after is not None and after['go']:

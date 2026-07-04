@@ -147,11 +147,24 @@ CREATE TABLE MD_scrape_control (
   batch_size  INT DEFAULT 50,
   delay_sec   FLOAT DEFAULT 1.0,
   use_random  BIT DEFAULT 1,
+  abort_check INT DEFAULT 0,
   updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
               ON UPDATE CURRENT_TIMESTAMP
 );
 INSERT INTO MD_scrape_control (go_flag) VALUES (0);
 ```
+
+(for a table created before `abort_check` existed:
+`ALTER TABLE MD_scrape_control ADD COLUMN abort_check INT
+DEFAULT 0 AFTER use_random;` — agents fall back to their
+`-c` command-line value until the column exists)
+
+`abort_check` > 0 makes every agent re-check the go flag / abort
+request after that many doctors WITHIN a batch (default 0 =
+between batches only), so `go_flag = 0` stops the whole fleet
+within `abort_check × delay_sec` seconds; the interrupted
+batches' unprocessed numbers are released back to the pool
+immediately.
 
 Operation:
 
