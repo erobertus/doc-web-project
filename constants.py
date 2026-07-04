@@ -2,33 +2,28 @@ BATCH_SIZE = 50
 USE_RANDOM = False
 SECONDS_TO_WAIT = 10
 
-SEARCH_SUBMIT_BUTTON = 'p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_AllDoctorsSearch$btnSubmit1'
+# seconds to pause between two physician downloads (politeness
+# towards the register site; override with --delay)
+DEFAULT_DELAY = 1.0
 
-ALL_DR_SEARCH_CHECKMARK = \
-    "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
-    "AllDoctorsSearch$chkInactiveDoctors"
+# The new register (register.cpso.on.ca) names some reference
+# values differently from the old site. When the OLD name already
+# exists in the reference table, the alias below is used instead of
+# inserting a duplicate under the new name, so that existing codes
+# (and the scripts that rely on them) keep working.
+REG_STAT_ALIASES = {'Active': 'Active Member'}
+GENDER_ALIASES = {'Man': 'Male', 'Woman': 'Female'}
 
-CPSONO_FIELD = "p$lt$ctl01$pageplaceholder$p$lt$ctl02$CPSO_" \
-               "AllDoctorsSearch$txtCPSONumberGeneral"
+# status recorded for doctors that used to exist but are no longer
+# on the register at all (the new register purges deceased doctors
+# and other historical records instead of listing them as inactive)
+NOT_ON_REGISTER_STAT = 'Not on Register'
 DELIM_COMMA = ','
 BLANK = ''
 ALL = 'all'
-DIV = 'div'
 BEGIN_TRAN = 'START TRANSACTION'
 COMMIT_TRAN = 'COMMIT'
 ABORT_ALL = '!!!ABORT_ALL'
-SECT = 'section'
-CL_DR_INFO = 'doctor-info'
-CL_INFO = 'info'
-CL_PRACTICE_LOC = 'practice-location'
-CL_ADD_PR_LOC = 'location_details'
-CL_ERROR = 'global-error-msg'
-
-CL_SPECIALTIES = 'doctor-detail-section'
-ID_SPECIALTIES = 'specialties'
-
-CL_HOSPITALS = CL_SPECIALTIES
-ID_HOSPITALS = 'hospital_priv'
 
 MD_DIR_TABLE = 'z847e_MD_dir'
 
@@ -45,36 +40,27 @@ C_REG_STAT_CODE = 'reg_stat_code'
 C_REG_STAT_NAME = 'reg_stat_name'
 C_REG_EFF_DATE = 'reg_eff_date'
 C_REG_EXP_DATE = 'reg_exp_date'
-WEB_MEMBER_STAT = 'MEMBER STATUS'
-WEB_CPSO_REG_CL = 'CPSO REGISTRATION CLASS'
-WEB_EXPIRY_DATE = 'EXPIRY DATE'
 
 REG_CLASS_TABLE = 'z847e_MD_reg_classes'
 C_REG_CLASS_CODE = 'reg_class_code'
 C_REG_CLASS_NAME = 'reg_class_name'
 C_REG_CLASS_DATE = 'reg_certif_date'
 
-WEB_FRMR_NAME = 'Former Name:'
 C_FRMR_NAME = 'former_name'
-WEB_GENDER = 'Gender:'
 GENDER_TABLE = 'MD_genders'
 C_GENDER_CODE = 'gender_code'
 C_GENDER_NAME = 'gender_name'
 C_MD_GENDER = 'gender'
 C_DEF_ADDR = 'def_address'
-WEB_LANGUAGES = 'Languages Spoken:'
 MD_LANG_TABLE = 'z847e_MD_doc_x_lang'
 LANGUAGE_TABLE = 'z847e_MD_languages'
 C_LANG_CODE = 'lang_code'
 C_LANG_NAME = 'lang_name'
-WEB_UNIVERSITY = 'Education:'
 C_UNIV_CODE = 'univ_code'
 C_UNIV_NAME = 'univ_name'
 C_GRAD_YEAR = 'grad_year'
 UNIV_TABLE = 'z847e_MD_universities'
-WEB_DATE_OF_DEATH = 'Date of Death:'
 C_DATE_OF_DEATH = 'date_of_death'
-WEB_REG_IN_OTHER_JUR = 'Medical Licences in Other Jurisdictions'
 MD_REG_JURISDIC = 'z847e_MD_doc_x_jurisdiction'
 MD_ADDR_TABLE = 'MD_addresses'
 REG_JUR_TABLE = 'z847e_MD_reg_jurisdiction'
@@ -94,16 +80,9 @@ C_ADDR_FAX_NO = 'fax_no'
 C_ADDR_COUNTY = 'county'
 C_ADDR_IS_DEF = 'isDefault'
 C_ADDR_UNO = 'row_uno'
+C_ADDR_RAW = 'address_raw'
 C_GEO_UNO = 'geo_uno'
 NO_ADDR = 'Practice Address Not Available'
-
-POSTAL_SEPARATOR = '\xa0'
-PHONE_TAG = 'Phone:'
-FAX_TAG = 'Fax:'
-COUNTY_TAG = 'County:'
-E_DISTR_TAG = 'Electoral District:'
-
-CANADA = 'Canada'
 
 SPEC_TABLE = 'z847e_MD_spec_list'
 C_SPEC_CODE = 'spec_code'
@@ -121,13 +100,7 @@ C_HOSP_CODE = 'hosp_code'
 C_HOSP_NAME = 'hosp_name'
 
 WEB_NO_HOSP = 'No Privileges reported.'
-WEB_HOSP_NOTICES = 'Hospital Notices'
 MD_HOSP_TABLE = 'z847e_MD_doc_x_hosp'
-
-WEB2DB_MAP = {PHONE_TAG: C_ADDR_PHONE_NO, FAX_TAG: C_ADDR_FAX_NO,
-              E_DISTR_TAG: C_ADDR_DISTRICT, COUNTY_TAG: C_ADDR_COUNTY,
-              WEB_DATE_OF_DEATH: C_DATE_OF_DEATH,
-              WEB_GENDER: C_MD_GENDER}
 
 PREFIX = 'pre'
 SUFFIX = 'post'

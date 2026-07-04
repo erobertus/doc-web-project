@@ -1,0 +1,4 @@
+mariadb
+requests
+beautifulsoup4
+googlemaps
