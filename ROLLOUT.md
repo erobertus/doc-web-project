@@ -231,6 +231,8 @@ WHERE log_time < NOW() - INTERVAL 60 DAY;
 
 -- emergency stop of everything (old mechanism, still works)
 --   on any machine:  python main.py -a
+-- everything already dead, just clean the bookkeeping:
+--   python main.py --force-abort
 ```
 
 Notes:
@@ -252,5 +254,6 @@ Notes:
 | Agent log: `cannot connect` loop | Clinic firewall blocks 3306 to faxcomet.com |
 | Agents idle though go_flag=1 | Outside run window? Check `SELECT CURTIME();` vs run_from/run_until (DB clock rules) |
 | Every agent stops immediately | Leftover abort row — `DELETE FROM MD_batch_header WHERE host='!!!ABORT_ALL' AND batch_size<0;` |
-| `--abort` waits forever | Stale open batches — cleanup SQL in section 0 |
+| `--abort` waits forever | Dead clients' batches are reaped automatically once they pass `--stale-minutes` (30 min default); use `--force-abort` to clean immediately |
+| Crashed client stranded its numbers | Self-healing: the next client to request a batch reaps open batches with no completions for 30+ min and releases their numbers — no manual action needed |
 | Repeated `fetch failed (HTTP 403/429)` in logs | Cloudflare pushback: raise `delay_sec`, or narrow the window |

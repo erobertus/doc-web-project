@@ -81,6 +81,11 @@ class DbLogger:
 
 DB_LOG = DbLogger()
 
+# effective stale-batch threshold; __main__ overrides it from
+# --stale-minutes so the auto-reap inside request_workload sees
+# the operator's choice
+STALE_MINUTES_ACTIVE = STALE_BATCH_MINUTES
+
 
 def reformat_date(cpso_date: str) -> str:
     MONTHS = dict(Jan='01', Feb='02', Mar='03', Apr='04', May='05',
@@ -409,6 +414,12 @@ def request_workload(conn: 'connection',
     if is_abort:
         print('Halt requested. Aborting...')
         return (0, tuple())
+
+    # self-healing: close batches abandoned by dead clients and
+    # put their numbers back into play before allocating our own
+    conn.autocommit = save_commit_state
+    reap_stale_batches(conn, stale_minutes=STALE_MINUTES_ACTIVE)
+    conn.autocommit = False
 
     # curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     curs.execute(BEGIN_TRAN)
@@ -917,6 +928,100 @@ def release_unfinished(conn: 'connection', batch_id,
     conn.commit()
 
 
+def reap_stale_batches(conn: 'connection',
+                       stale_minutes=STALE_BATCH_MINUTES,
+                       release_days=366) -> int:
+    """Close batches abandoned by dead clients (crash, power
+    loss, ...) and return their unfinished numbers to the pool.
+    A live client completes a number every second or two, so an
+    OPEN batch with no completed numbers for stale_minutes can
+    only belong to a dead process. Runs automatically whenever a
+    client requests a new batch - the ecosystem heals itself."""
+    if stale_minutes <= 0:
+        return 0
+
+    save_commit_state = conn.autocommit
+    conn.autocommit = False
+    curs = conn.cursor()
+
+    curs.execute(
+        f'SELECT h.batch_uno, h.host '
+        f'FROM {BATCH_HEAD_TBL} h '
+        f'WHERE h.end_date IS NULL '
+        f'AND h.host <> "{ABORT_ALL}" '
+        f'AND h.start_date < NOW() - INTERVAL ? MINUTE '
+        f'AND NOT EXISTS ('
+        f'  SELECT 1 FROM {BATCH_DET_TBL} d '
+        f'  WHERE d.batch_uno = h.batch_uno '
+        f'  AND d.isCompleted '
+        f'  AND d.updated_date_time > '
+        f'      NOW() - INTERVAL ? MINUTE)',
+        (stale_minutes, stale_minutes))
+    dead = [(batch_uno, host) for (batch_uno, host) in curs]
+
+    for (batch_uno, host) in dead:
+        curs.execute(f'UPDATE {BATCH_DET_TBL} '
+                     f'SET updated_date_time = '
+                     f'NOW() - INTERVAL ? DAY '
+                     f'WHERE batch_uno = ? AND NOT isCompleted',
+                     (release_days, batch_uno))
+        released = curs.rowcount
+        curs.execute(f'UPDATE {BATCH_HEAD_TBL} '
+                     f'SET InProgress = 0, Abandoned = 1, '
+                     f'end_date = NOW(), status_date = NOW() '
+                     f'WHERE batch_uno = ? '
+                     f'AND end_date IS NULL', (batch_uno,))
+        print(f'Reaped stale batch {batch_uno} ({host}): '
+              f'released {released} unfinished number(s).')
+        DB_LOG.log('WARN',
+                   f'reaped stale batch from {host}; released '
+                   f'{released} unfinished numbers',
+                   batch_uno=batch_uno)
+
+    conn.commit()
+    conn.autocommit = save_commit_state
+    return len(dead)
+
+
+def force_abort_all(conn: 'connection', release_days=366):
+    """--force-abort: unconditionally close ALL open batches,
+    release their unfinished numbers and clear any abort flags.
+    For when the operator knows no clients are alive."""
+    save_commit_state = conn.autocommit
+    conn.autocommit = False
+    curs = conn.cursor()
+
+    curs.execute(f'UPDATE {BATCH_DET_TBL} d '
+                 f'JOIN {BATCH_HEAD_TBL} h '
+                 f'ON d.batch_uno = h.batch_uno '
+                 f'SET d.updated_date_time = '
+                 f'NOW() - INTERVAL ? DAY '
+                 f'WHERE NOT d.isCompleted '
+                 f'AND h.end_date IS NULL '
+                 f'AND h.host <> "{ABORT_ALL}"',
+                 (release_days,))
+    released = curs.rowcount
+
+    curs.execute(f'UPDATE {BATCH_HEAD_TBL} '
+                 f'SET InProgress = 0, Abandoned = 1, '
+                 f'end_date = NOW(), status_date = NOW() '
+                 f'WHERE end_date IS NULL '
+                 f'AND host <> "{ABORT_ALL}"')
+    closed = curs.rowcount
+
+    curs.execute(ABORT_DEL_SQL)
+
+    conn.commit()
+    conn.autocommit = save_commit_state
+
+    print(f'Force abort: closed {closed} open batch(es), '
+          f'released {released} unfinished number(s), '
+          f'cleared abort flags.')
+    DB_LOG.log('WARN',
+               f'force abort: closed {closed} open batches, '
+               f'released {released} unfinished numbers')
+
+
 def run_sweep(conn: 'connection', http_session,
               cpso_start: int, cpso_stop: int, batch_size: int,
               use_random=True, descending=False,
@@ -1351,7 +1456,28 @@ if __name__ == '__main__':
                              '(default=50)')
     parser.add_argument('-a', '--abort',
                         action='store_true',
-                        help='request abort of all running scrapes')
+                        help='request abort of all running scrapes '
+                             '(waits for live clients to stop; '
+                             'batches of dead clients are reaped '
+                             'once they age past --stale-minutes)')
+    parser.add_argument('--force-abort',
+                        action='store_true',
+                        help='immediately close ALL open batches, '
+                             'release their unfinished numbers '
+                             'and clear abort flags, without '
+                             'waiting - use when no clients are '
+                             'alive')
+    parser.add_argument('--stale-minutes', type=int,
+                        default=STALE_BATCH_MINUTES,
+                        metavar='N',
+                        help='an open batch with no completed '
+                             'numbers for N minutes is considered '
+                             'abandoned by a dead client and is '
+                             'automatically closed (its numbers '
+                             'return to the pool); checked every '
+                             'time a client requests a batch; '
+                             '0 disables '
+                             f'(default={STALE_BATCH_MINUTES})')
     parser.add_argument('-v', '--verbose-log',
                         action='store_true',
                         help='also write each doctor\'s summary '
@@ -1429,6 +1555,8 @@ if __name__ == '__main__':
                              'registered doctors')
     args = parser.parse_args()
 
+    STALE_MINUTES_ACTIVE = args.stale_minutes
+
     # central fleet log (best-effort; falls back to console)
     DB_LOG.init(user=args.db_user,
                 password=args.db_pass,
@@ -1484,6 +1612,10 @@ if __name__ == '__main__':
             print(f"Waiting {SECONDS_TO_WAIT} seconds for all tasks "
                   f"to finish...")
             sleep(SECONDS_TO_WAIT)
+            # batches of dead clients would keep this loop
+            # waiting forever - reap them as they age out
+            reap_stale_batches(connect_db,
+                               stale_minutes=args.stale_minutes)
             curs.execute(CHECK_STOP_STATUS)
             running_tasks = curs.fetchone()[0]
             print(f"Number of running tasks: {running_tasks}")
@@ -1492,6 +1624,9 @@ if __name__ == '__main__':
         curs.execute(ABORT_DEL_SQL)
         connect_db.autocommit = save_commit_state
         print("Done.")
+
+    elif args.force_abort:
+        force_abort_all(connect_db)
 
     elif args.agent:
         run_agent(args, connect_db)

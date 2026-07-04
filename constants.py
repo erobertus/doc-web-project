@@ -15,6 +15,11 @@ DEFAULT_INTERVAL_DAYS = 20
 # console-only logging when the table does not exist)
 LOG_TBL = 'MD_scrape_log'
 
+# a batch that is still open but has produced no completed
+# numbers for this long belongs to a dead client and is reaped
+# (closed + its unfinished numbers released); 0 disables reaping
+STALE_BATCH_MINUTES = 30
+
 # --agent mode: central control table and poll cadence
 CONTROL_TBL = 'MD_scrape_control'
 AGENT_POLL_SECS = 120
