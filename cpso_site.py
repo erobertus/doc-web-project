@@ -8,6 +8,7 @@
 # database writes stay in main.py.
 
 import re
+import json
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -376,16 +377,78 @@ def parse_physician_page(html: str):
     return rec
 
 
-def search_by_number(session: requests.Session, cpso_no: int,
-                     timeout=90) -> dict:
-    """Light-weight existence check through the JSON search API.
-    Not used by the main flow (the detail page alone is enough)
-    but handy for diagnostics."""
-    resp = session.post(SEARCH_URL, data={
-        'cpsoNumber': str(cpso_no),
-        'cbx-includeinactive': 'on',
-        'cbx-includeinactive-20years': 'on',
-    }, timeout=timeout)
-    resp.raise_for_status()
-    import json
-    return json.loads(resp.text)
+def fetch_search_result(session: requests.Session, cpso_no: int,
+                        max_attempts=5, retry_delay=15,
+                        timeout=90) -> dict:
+    """Query the JSON search API (the same endpoint the site's own
+    results page calls), retrying transient errors. Returns the
+    parsed response: {'totalcount': N, 'results': [{...}]} with
+    name, registrationstatus, mostrecentformername, specialties
+    and the PRIMARY address/phone/fax only."""
+    last_err = ''
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = session.post(SEARCH_URL, data={
+                'cpsoNumber': str(cpso_no),
+                'cbx-includeinactive': 'on',
+                'cbx-includeinactive-20years': 'on',
+            }, timeout=timeout)
+            if resp.status_code == 200:
+                try:
+                    return json.loads(resp.text)
+                except ValueError as e:
+                    last_err = f'bad JSON: {e}'
+            else:
+                last_err = f'HTTP {resp.status_code}'
+        except requests.RequestException as e:
+            last_err = repr(e)
+        if attempt < max_attempts:
+            wait = retry_delay * attempt
+            print(f'CPSO {cpso_no}: search failed ({last_err}), '
+                  f'attempt {attempt}/{max_attempts}, '
+                  f'retrying in {wait} sec...')
+            time.sleep(wait)
+    raise CpsoFetchError(
+        f'CPSO {cpso_no}: search giving up after {max_attempts} '
+        f'attempts ({last_err})')
+
+
+# backward-compatible name for diagnostics
+search_by_number = fetch_search_result
+
+
+def search_result_location(result: dict) -> dict:
+    """Convert one JSON search result into the same location
+    structure parse_physician_page produces, so the address can
+    go through the same DB path."""
+    lines = []
+    for i in (1, 2, 3, 4):
+        s = _norm(result.get(f'street{i}') or '')
+        if s:
+            lines.append(s)
+
+    city = _norm(result.get('city') or '')
+    prov_name = _norm(result.get('province') or '')
+    postal = _norm(result.get('postalcode') or '').upper()
+
+    prov = PROVINCE_MAP.get(prov_name.upper(), '')
+    if prov:
+        country = 'Canada'
+    else:
+        prov = US_STATES.get(prov_name.upper(), '')
+        country = 'United States' if prov else ''
+    if not prov:
+        prov = prov_name        # keep verbatim rather than lose it
+
+    address = None
+    if lines or city or postal:
+        locality = ' '.join(x for x in (city, prov_name, postal)
+                            if x)
+        address = {'lines': lines, 'city': city, 'prov': prov,
+                   'postal': postal, 'country': country,
+                   'raw': '\n'.join(lines + ([locality]
+                                             if locality else []))}
+
+    phone, ext = parse_phone(result.get('phonenumber') or '')
+    return {'address': address, 'phone': phone, 'ext': ext,
+            'fax': _norm(result.get('fax') or '')}

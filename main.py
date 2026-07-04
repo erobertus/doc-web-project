@@ -10,7 +10,8 @@ from time import sleep
 from constants import *
 from GeoCoding import get_geocode_db_uno
 from cpso_site import (make_session, fetch_physician_page,
-                       parse_physician_page, CpsoFetchError)
+                       parse_physician_page, fetch_search_result,
+                       search_result_location, CpsoFetchError)
 
 
 def reformat_date(cpso_date: str) -> str:
@@ -441,6 +442,169 @@ def update_detail_table(conn: 'connection',
     conn.commit()
 
 
+def flag_not_on_register(conn: 'connection', cur_CPSO: int,
+                         db_statuses: dict, batch_id=0,
+                         exclude_invalid=False):
+    """The register genuinely has no such CPSO number. Unlike the
+    old site, the new register also PURGES some historical
+    doctors, so do not delete anything - keep the collected data
+    and only flag the status."""
+    print(f'({batch_id}) CPSO: {cur_CPSO} - '
+          f'not on the register.')
+
+    stat_code = retrieve_code_from_name(
+        NOT_ON_REGISTER_STAT, db_statuses, conn,
+        REG_STAT_TABLE, C_REG_STAT_CODE, C_REG_STAT_NAME)
+
+    curs = conn.cursor()
+    curs.execute(f'UPDATE {MD_DIR_TABLE} '
+                 f'SET {C_REG_STAT_CODE} = ?, '
+                 f'{C_LAST_MODIF} = NOW() '
+                 f'WHERE {C_CPSO_NO} = ?',
+                 (stat_code, cur_CPSO))
+    conn.commit()
+
+    update_detail_table(conn, cur_CPSO, batch_id=batch_id,
+                        perm_exclude=exclude_invalid)
+
+
+def process_record_quick(conn: 'connection', cur_CPSO: int,
+                         batch_id=0,
+                         exclude_invalid=False,
+                         session=None) -> list:
+    """Refresh a doctor from the JSON search API only (~1 KB per
+    doctor instead of a ~300 KB detail page). Updates the name,
+    former name, registration status and the DEFAULT address /
+    phone / fax; additional locations, specialties, education,
+    languages and hospital privileges are left as previously
+    collected. Falls back to the full detail-page scrape when the
+    doctor is not in the database yet, or when the status changed
+    away from active (the API does not carry the detailed
+    inactive reason)."""
+    db_statuses = refresh_ref_from_db(conn, REG_STAT_TABLE,
+                                      C_REG_STAT_CODE,
+                                      C_REG_STAT_NAME)
+
+    if session is None:
+        session = make_session()
+
+    try:
+        data = fetch_search_result(session, cur_CPSO)
+    except CpsoFetchError as e:
+        print(f'({batch_id}) {e}')
+        return []
+
+    results = data.get('results') or []
+
+    if len(results) == 0:
+        flag_not_on_register(conn, cur_CPSO, db_statuses,
+                             batch_id, exclude_invalid)
+        return []
+
+    result = results[0]
+    is_active = (result.get('registrationstatus') == 'Active')
+
+    curs = conn.cursor()
+    curs.execute(f'SELECT {C_REG_STAT_CODE} FROM {MD_DIR_TABLE} '
+                 f'WHERE {C_CPSO_NO} = ?', (cur_CPSO,))
+    row = curs.fetchone()
+
+    if row is None:
+        # new doctor: collect the complete record
+        return process_record(conn, cur_CPSO, batch_id=batch_id,
+                              exclude_invalid=exclude_invalid,
+                              session=session)
+
+    if not is_active:
+        code_names = {code: name
+                      for (name, code) in db_statuses.items()}
+        cur_stat_name = code_names.get(row[0], '')
+        if cur_stat_name.upper().startswith('ACTIVE'):
+            # went inactive since the last run: the JSON does not
+            # say why, so fetch the detailed status once
+            return process_record(conn, cur_CPSO,
+                                  batch_id=batch_id,
+                                  exclude_invalid=exclude_invalid,
+                                  session=session)
+        # already inactive with a detailed reason - nothing new
+        update_detail_table(conn, cur_CPSO, batch_id=batch_id)
+        return []
+
+    save_commit_state = conn.autocommit
+    conn.autocommit = False
+
+    # default address, phone and fax
+    addr_recs = process_address(
+        conn, [search_result_location(result)])
+    addr_uno = None
+    if len(addr_recs) > 0:
+        curs.execute(f'DELETE FROM {MD_ADDR_TABLE} '
+                     f'WHERE {C_CPSO_NO} = ? '
+                     f'AND {C_ADDR_ORDER} = 1', (cur_CPSO,))
+        cur_rec = {C_CPSO_NO: cur_CPSO}
+        cur_rec.update(addr_recs[0])
+        col_str = ', '.join(cur_rec.keys())
+        val_str = ', '.join('?' * len(cur_rec))
+        try:
+            curs.execute(f'INSERT INTO {MD_ADDR_TABLE} '
+                         f'({col_str}) VALUES({val_str})',
+                         tuple(cur_rec.values()))
+            addr_uno = curs.lastrowid
+        except mariadb.Error as e:
+            print(f"!!! DB error: {e}")
+
+    # name, former name, status
+    upd = {}
+    names = result.get('name', '').split(',')
+    upd[C_LNAME] = names[0].strip()
+    if len(names) > 1:
+        first_middle = names[1].split()
+        if len(first_middle) > 0:
+            upd[C_FNAME] = first_middle[0]
+            if len(first_middle) > 1:
+                upd[C_MNAME] = ' '.join(first_middle[1:])
+
+    former = result.get('mostrecentformername', '').strip()
+    if former:
+        upd[C_FRMR_NAME] = former
+
+    upd[C_REG_STAT_CODE] = retrieve_code_from_name(
+        result.get('registrationstatus'), db_statuses, conn,
+        REG_STAT_TABLE, C_REG_STAT_CODE, C_REG_STAT_NAME,
+        aliases=REG_STAT_ALIASES)
+
+    if addr_uno is not None:
+        upd[C_DEF_ADDR] = addr_uno
+
+    set_str = ', '.join(f'{col} = ?' for col in upd.keys())
+    curs.execute(f'UPDATE {MD_DIR_TABLE} '
+                 f'SET {set_str}, {C_LAST_MODIF} = NOW() '
+                 f'WHERE {C_CPSO_NO} = ?',
+                 tuple(upd.values()) + (cur_CPSO,))
+
+    for s in FINAL_SQL:
+        curs.execute(s, (cur_CPSO,))
+
+    conn.commit()
+    conn.autocommit = save_commit_state
+
+    record = {C_CPSO_NO: cur_CPSO, MD_ADDR_TABLE: addr_recs}
+    record.update(upd)
+    print(f'({batch_id}) [quick]',
+          print_rec(record, (C_CPSO_NO, C_FNAME, C_LNAME, C_MNAME,
+                             C_ADDR_PREFIX + '1',
+                             C_ADDR_PREFIX + '2',
+                             C_ADDR_PREFIX + '3',
+                             C_ADDR_PREFIX + '4',
+                             C_ADDR_CITY,
+                             C_ADDR_PROV, C_ADDR_POSTAL,
+                             C_ADDR_COUNTRY,
+                             C_ADDR_PHONE_NO, C_ADDR_FAX_NO)))
+
+    update_detail_table(conn, cur_CPSO, batch_id=batch_id)
+    return []
+
+
 def process_record(conn: 'connection', cur_CPSO: int,
                    batch_id=0,
                    exclude_invalid=False,
@@ -488,27 +652,8 @@ def process_record(conn: 'connection', cur_CPSO: int,
     parsed = parse_physician_page(html)
 
     if parsed is None:
-        # The register genuinely has no such CPSO number. Unlike
-        # the old site, the new register also PURGES deceased and
-        # some historical doctors, so do not delete anything -
-        # keep the collected data and only flag the status.
-        print(f'({batch_id}) CPSO: {cur_CPSO} - '
-              f'not on the register.')
-
-        stat_code = retrieve_code_from_name(
-            NOT_ON_REGISTER_STAT, db_statuses, conn,
-            REG_STAT_TABLE, C_REG_STAT_CODE, C_REG_STAT_NAME)
-
-        curs = conn.cursor()
-        curs.execute(f'UPDATE {MD_DIR_TABLE} '
-                     f'SET {C_REG_STAT_CODE} = ?, '
-                     f'{C_LAST_MODIF} = NOW() '
-                     f'WHERE {C_CPSO_NO} = ?',
-                     (stat_code, cur_CPSO))
-        conn.commit()
-
-        update_detail_table(conn, cur_CPSO, batch_id=batch_id,
-                            perm_exclude=exclude_invalid)
+        flag_not_on_register(conn, cur_CPSO, db_statuses,
+                             batch_id, exclude_invalid)
         return []
 
     record = {C_CPSO_NO: cur_CPSO}
@@ -695,6 +840,19 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--abort',
                         action='store_true',
                         help='request abort of all running scrapes')
+    parser.add_argument('-q', '--quick',
+                        action='store_true',
+                        help='refresh from the JSON search API '
+                             'only (much lighter/faster): '
+                             'updates name, status and the '
+                             'default address/phone/fax; leaves '
+                             'additional locations, specialties, '
+                             'education, languages and hospital '
+                             'privileges as previously '
+                             'collected. Falls back to a full '
+                             'page scrape for new doctors and '
+                             'for doctors that went inactive '
+                             'since the last run')
     parser.add_argument('--delay', type=float,
                         default=DEFAULT_DELAY,
                         help='seconds to wait between two '
@@ -748,6 +906,7 @@ if __name__ == '__main__':
           f"Batch size : {BATCH_SIZE}\n"
           f"Delay      : {args.delay}\n"
           f"Perm excl. : {args.perm_exclude}\n"
+          f"Quick mode : {args.quick}\n"
           f"======================================")
 
     if args.abort:
@@ -796,8 +955,11 @@ if __name__ == '__main__':
             print(f"Running batch {batch_no} "
                   f"({CPSO_START}-{CPSO_STOP}:{BATCH_SIZE})\n"
                   f"======================================")
+            scrape_one = process_record_quick if args.quick \
+                else process_record
+
             for cpso_no in workload[1]:
-                all_recs = process_record(
+                all_recs = scrape_one(
                     connect_db, cpso_no,
                     batch_id=batch_no,
                     exclude_invalid=(args.perm_exclude or

@@ -106,8 +106,23 @@ lines so nothing is lost; the geocode probe deals with them.
 python main.py -h                     # full option list
 python main.py -z 100 -r             # random order, batch of 100
 python main.py -s 158100 -e 200000   # only the new number range
+python main.py -q -r                 # quick refresh via JSON API
 python main.py -a                    # abort all running scrapes
 ```
+
+### Quick mode (`-q` / `--quick`)
+
+Uses only the JSON search API (~1 KB per doctor instead of a
+~300 KB page). Per doctor it refreshes the name, former name,
+registration status and the DEFAULT address / phone / fax (and
+re-runs the fax/postal cleanup SQL); additional locations,
+specialties, education, languages and hospital privileges keep
+their previously collected values. It automatically falls back to
+the full page scrape when (a) the doctor is not in the database
+yet, or (b) the status changed away from active — the API only
+says "Inactive" without the detailed reason. Good for mid-cycle
+refreshes of the fax/postal data; run the full scrape (no `-q`)
+for the twice-a-year update.
 
 Defaults: CPSO range 10000–200000, batch 50, 1 s delay, DB
 `faxcomet_MD_list` on `faxcomet.com` (see `-h` for the credentials
