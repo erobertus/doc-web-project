@@ -7,6 +7,7 @@ import mariadb
 import time
 import argparse
 from time import sleep
+from datetime import timedelta
 from constants import *
 from GeoCoding import get_geocode_db_uno
 from cpso_site import (make_session, fetch_physician_page,
@@ -910,7 +911,8 @@ def run_sweep(conn: 'connection', http_session,
             break
 
         if control_check is not None and not control_check():
-            print('Go flag cleared - stopping this sweep.')
+            print('Stop signal (go flag / run window) - '
+                  'stopping this sweep.')
             break
 
         workload = request_workload(conn, random=use_random,
@@ -930,23 +932,31 @@ def read_control(conn: 'connection'):
     base_cols = 'go_flag+0, quick_mode+0, cpso_start, ' \
                 'cpso_stop, batch_size, delay_sec, ' \
                 'use_random+0, updated'
+    # newest optional columns first; fall back for control tables
+    # created before they were introduced. CURTIME() rides along
+    # so the schedule window is judged by the DATABASE clock -
+    # consistent across the whole fleet regardless of how each
+    # machine's local timezone is set.
+    variants = (
+        (f'{base_cols}, abort_check, run_from, run_until, '
+         f'CURTIME()', 'window'),
+        (f'{base_cols}, abort_check, CURTIME()', 'abort_check'),
+        (f'{base_cols}, CURTIME()', 'base'),
+    )
+    row = None
+    level = 'base'
     try:
-        try:
-            curs.execute(
-                f'SELECT {base_cols}, abort_check '
-                f'FROM {CONTROL_TBL} '
-                f'ORDER BY control_uno DESC LIMIT 1')
-            row = curs.fetchone()
-            has_abort_check = True
-        except mariadb.Error:
-            # control table created before the abort_check column
-            # was introduced - fall back to the CLI value
-            curs.execute(
-                f'SELECT {base_cols} '
-                f'FROM {CONTROL_TBL} '
-                f'ORDER BY control_uno DESC LIMIT 1')
-            row = curs.fetchone()
-            has_abort_check = False
+        for (cols, lvl) in variants:
+            try:
+                curs.execute(
+                    f'SELECT {cols} FROM {CONTROL_TBL} '
+                    f'ORDER BY control_uno DESC LIMIT 1')
+                row = curs.fetchone()
+                level = lvl
+                break
+            except mariadb.Error:
+                if lvl == 'base':
+                    raise
     finally:
         # leave the read snapshot behind so the next poll sees
         # fresh data (REPEATABLE READ would keep serving the old
@@ -956,17 +966,46 @@ def read_control(conn: 'connection'):
     if row is None:
         return None
 
-    return {'go': bool(row[0]),
-            'quick': bool(row[1]),
-            'cpso_start': row[2] if row[2] is not None else 10000,
-            'cpso_stop': row[3] if row[3] is not None else 200000,
-            'batch_size': row[4] if row[4] is not None else 50,
-            'delay': float(row[5]) if row[5] is not None
-                     else DEFAULT_DELAY,
-            'random': bool(row[6]),
-            'updated': row[7],
-            'abort_check': (row[8] if has_abort_check
-                            and row[8] is not None else None)}
+    ctl = {'go': bool(row[0]),
+           'quick': bool(row[1]),
+           'cpso_start': row[2] if row[2] is not None else 10000,
+           'cpso_stop': row[3] if row[3] is not None else 200000,
+           'batch_size': row[4] if row[4] is not None else 50,
+           'delay': float(row[5]) if row[5] is not None
+                    else DEFAULT_DELAY,
+           'random': bool(row[6]),
+           'updated': row[7],
+           'abort_check': None,
+           'run_from': None,
+           'run_until': None,
+           'now': row[-1]}
+
+    if level in ('abort_check', 'window'):
+        ctl['abort_check'] = row[8]
+    if level == 'window':
+        ctl['run_from'] = row[9]
+        ctl['run_until'] = row[10]
+
+    ctl['in_window'] = in_time_window(ctl['now'],
+                                      ctl['run_from'],
+                                      ctl['run_until'])
+    return ctl
+
+
+def in_time_window(now_td, from_td, until_td) -> bool:
+    """True when 'now' falls inside the daily run window. TIME
+    values arrive from the connector as timedeltas. Both limits
+    NULL (or equal) = no restriction; from > until = an overnight
+    window that wraps midnight (e.g. 19:00 -> 06:30)."""
+    if from_td is None and until_td is None:
+        return True
+    start = from_td if from_td is not None else timedelta(0)
+    end = until_td if until_td is not None else timedelta(hours=24)
+    if start == end:
+        return True
+    if start < end:
+        return start <= now_td < end
+    return now_td >= start or now_td < end
 
 
 def run_agent(args, conn: 'connection'):
@@ -978,6 +1017,7 @@ def run_agent(args, conn: 'connection'):
     completed_marker = None      # control 'updated' stamp of the
                                  # last fully exhausted sweep
     completed_time = 0.0
+    waiting_logged = False
 
     print(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
           f'every {args.poll_interval} sec. Ctrl-C to stop.')
@@ -992,7 +1032,17 @@ def run_agent(args, conn: 'connection'):
             elif not ctl['go']:
                 completed_marker = None
                 completed_time = 0.0
+                waiting_logged = False
+            elif not ctl['in_window']:
+                if not waiting_logged:
+                    print(f"Agent: go is set but outside the "
+                          f"run window "
+                          f"({ctl['run_from']} - "
+                          f"{ctl['run_until']}, db time "
+                          f"{ctl['now']}); waiting...")
+                    waiting_logged = True
             else:
+                waiting_logged = False
                 resweep_due = (time.time() - completed_time
                                >= AGENT_RESWEEP_SECS)
                 if ctl['updated'] != completed_marker \
@@ -1005,6 +1055,11 @@ def run_agent(args, conn: 'connection'):
                           f"random={ctl['random']}\n"
                           f"======================================")
 
+                    def keep_running():
+                        c = read_control(conn)
+                        return (c is not None and c['go']
+                                and c['in_window'])
+
                     n = run_sweep(
                         conn, http_session,
                         ctl['cpso_start'], ctl['cpso_stop'],
@@ -1012,20 +1067,19 @@ def run_agent(args, conn: 'connection'):
                         use_random=ctl['random'],
                         delay=ctl['delay'],
                         quick=ctl['quick'],
-                        control_check=lambda:
-                            (read_control(conn) or {})
-                            .get('go', False),
+                        control_check=keep_running,
                         check_every=(
                             ctl['abort_check']
                             if ctl['abort_check'] is not None
                             else args.abort_check))
 
                     after = read_control(conn)
-                    if after is not None and after['go']:
-                        # pool exhausted while still 'go': note the
-                        # control stamp so we do not spin; re-sweep
-                        # when the row changes or after the idle
-                        # period
+                    if after is not None and after['go'] \
+                            and after['in_window']:
+                        # pool exhausted while still 'go' inside
+                        # the window: note the control stamp so we
+                        # do not spin; re-sweep when the row
+                        # changes or after the idle period
                         completed_marker = after['updated']
                         completed_time = time.time()
                         print(f'Agent: pool exhausted '
@@ -1034,8 +1088,9 @@ def run_agent(args, conn: 'connection'):
                               f'{AGENT_RESWEEP_SECS // 3600} h '
                               f'passes.')
                     else:
-                        # stopped by flag drop: forget the marker
-                        # so the next 'go' resumes immediately
+                        # stopped by flag drop or window close:
+                        # forget the marker so the sweep resumes
+                        # as soon as go/window allows
                         completed_marker = None
                         completed_time = 0.0
 

@@ -148,16 +148,19 @@ CREATE TABLE MD_scrape_control (
   delay_sec   FLOAT DEFAULT 1.0,
   use_random  BIT DEFAULT 1,
   abort_check INT DEFAULT 0,
+  run_from    TIME NULL,
+  run_until   TIME NULL,
   updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
               ON UPDATE CURRENT_TIMESTAMP
 );
 INSERT INTO MD_scrape_control (go_flag) VALUES (0);
 ```
 
-(for a table created before `abort_check` existed:
+(for a table created before these columns existed:
 `ALTER TABLE MD_scrape_control ADD COLUMN abort_check INT
-DEFAULT 0 AFTER use_random;` — agents fall back to their
-`-c` command-line value until the column exists)
+DEFAULT 0 AFTER use_random, ADD COLUMN run_from TIME NULL
+AFTER abort_check, ADD COLUMN run_until TIME NULL AFTER
+run_from;` — agents degrade gracefully until the columns exist)
 
 `abort_check` > 0 makes every agent re-check the go flag / abort
 request after that many doctors WITHIN a batch (default 0 =
@@ -165,6 +168,23 @@ between batches only), so `go_flag = 0` stops the whole fleet
 within `abort_check × delay_sec` seconds; the interrupted
 batches' unprocessed numbers are released back to the pool
 immediately.
+
+`run_from` / `run_until` restrict scraping to a daily time
+window, e.g. after hours:
+
+```sql
+UPDATE MD_scrape_control
+SET run_from = '19:00:00', run_until = '06:30:00';  -- overnight
+```
+
+Both NULL = run any time. `run_from > run_until` wraps midnight.
+The window is judged by the DATABASE server clock (`CURTIME()`),
+so all machines agree regardless of their local timezone
+settings. Agents idle outside the window, start sweeping when it
+opens, stop within the `abort_check` cadence when it closes
+(releasing unfinished numbers), and resume automatically the
+next day until the pool is exhausted. `go_flag` still rules
+overall: window scheduling only applies while it is set.
 
 Operation:
 
