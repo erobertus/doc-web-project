@@ -344,17 +344,18 @@ def request_workload(conn: 'connection',
         # GET LIST OF CPSO NUMBERS
         # create simple range first
         src_list = [x for x in range(min_val, max_val)]
-        if desc:
-            src_list.reverse()
     else:
-        stmt = 'SELECT d.CPSO_no, floor(RAND() * 10000000) r ' \
+        # random mode refreshes doctors we already know about,
+        # in shuffled order (the ORDER BY happens on the final
+        # select below - the temp table would lose any insertion
+        # order to its primary key anyway)
+        stmt = 'SELECT d.CPSO_no ' \
                f'FROM {MD_DIR_TABLE} d ' \
-               f'WHERE d.CPSO_no between {min_val} and {max_val} ' \
-               'ORDER BY r ' \
+               f'WHERE d.CPSO_no between {min_val} and {max_val}'
 
         curs.execute(stmt)
 
-        src_list = [cpso_no for (cpso_no, order) in curs]
+        src_list = [cpso_no for (cpso_no,) in curs]
 
     stmt = f'CREATE TEMPORARY TABLE _TMP_{batch_id} (' \
            f'cpso_no INT(11),' \
@@ -362,11 +363,19 @@ def request_workload(conn: 'connection',
 
     curs.execute(stmt)
 
-    stmt = f'INSERT INTO _TMP_{batch_id} VALUES (' \
-           + '), ('.join(map(str,src_list)) \
-           + ')'
+    if len(src_list) > 0:
+        stmt = f'INSERT INTO _TMP_{batch_id} VALUES (' \
+               + '), ('.join(map(str,src_list)) \
+               + ')'
 
-    curs.execute(stmt)
+        curs.execute(stmt)
+
+    if random:
+        order_clause = 'ORDER BY RAND()'
+    elif desc:
+        order_clause = 'ORDER BY cpso_no DESC'
+    else:
+        order_clause = 'ORDER BY cpso_no'
 
     stmt = f'SELECT cpso_no FROM _TMP_{batch_id} ' \
            f'WHERE cpso_no not in (' \
@@ -375,6 +384,7 @@ def request_workload(conn: 'connection',
            'AND (updated_date_time > (NOW() - INTERVAL ' \
            f'{interval} DAY) ' \
            'OR PermExcluded) ) ' \
+           f'{order_clause} ' \
            f'LIMIT {batch_size}'
 
     curs.execute(stmt)
