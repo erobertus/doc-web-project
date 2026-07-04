@@ -150,6 +150,7 @@ CREATE TABLE MD_scrape_control (
   abort_check INT DEFAULT 0,
   run_from    TIME NULL,
   run_until   TIME NULL,
+  interval_days INT DEFAULT 20,
   updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
               ON UPDATE CURRENT_TIMESTAMP
 );
@@ -160,7 +161,16 @@ INSERT INTO MD_scrape_control (go_flag) VALUES (0);
 `ALTER TABLE MD_scrape_control ADD COLUMN abort_check INT
 DEFAULT 0 AFTER use_random, ADD COLUMN run_from TIME NULL
 AFTER abort_check, ADD COLUMN run_until TIME NULL AFTER
-run_from;` — agents degrade gracefully until the columns exist)
+run_from, ADD COLUMN interval_days INT DEFAULT 20 AFTER
+run_until;` — agents degrade gracefully until the columns exist)
+
+`interval_days` is the freshness window: a doctor is offered for
+re-scraping only when the last update is older than this many
+days (also available as `-i/--interval` outside agent mode).
+Together with the run window this sets the rhythm of the
+standing fleet: e.g. `interval_days = 20` + a nightly window =
+every doctor re-checked roughly every three weeks, spread
+naturally across nights.
 
 `abort_check` > 0 makes every agent re-check the go flag / abort
 request after that many doctors WITHIN a batch (default 0 =

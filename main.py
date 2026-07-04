@@ -315,7 +315,7 @@ def print_rec(rec: dict, fields: tuple, map=PRES_MAP) -> str:
 def request_workload(conn: 'connection',
                      batch_size=1000,
                      random=True,
-                     interval=20,
+                     interval=DEFAULT_INTERVAL_DAYS,
                      min_val=10000,
                      max_val=150000,
                      desc=False) -> tuple:
@@ -810,16 +810,17 @@ def check_abort_requested(conn: 'connection') -> bool:
     return cnt > 0
 
 
-def release_unfinished(conn: 'connection', batch_id):
+def release_unfinished(conn: 'connection', batch_id,
+                       interval=DEFAULT_INTERVAL_DAYS):
     """Return the unprocessed numbers of a batch to the pool by
-    backdating their claim stamp, so the next run can pick them
-    up immediately instead of after the freshness interval."""
+    backdating their claim stamp past the freshness interval, so
+    the next run can pick them up immediately."""
     curs = conn.cursor()
     curs.execute(f'UPDATE {BATCH_DET_TBL} '
                  f'SET updated_date_time = '
-                 f'NOW() - INTERVAL 30 DAY '
+                 f'NOW() - INTERVAL ? DAY '
                  f'WHERE batch_uno = ? AND NOT isCompleted',
-                 (batch_id,))
+                 (interval + 1, batch_id))
     conn.commit()
 
 
@@ -828,7 +829,8 @@ def run_sweep(conn: 'connection', http_session,
               use_random=True, descending=False,
               delay=DEFAULT_DELAY, quick=False,
               perm_exclude=False, control_check=None,
-              check_every=0) -> int:
+              check_every=0,
+              interval=DEFAULT_INTERVAL_DAYS) -> int:
     """Work the CPSO number pool until it is exhausted. When
     control_check is given it is consulted between batches; a
     falsy result stops the sweep after the current batch. With
@@ -858,7 +860,8 @@ def run_sweep(conn: 'connection', http_session,
                                 batch_size=batch_size,
                                 min_val=cpso_start,
                                 max_val=cpso_stop,
-                                desc=descending)
+                                desc=descending,
+                                interval=interval)
 
     while len(workload[1]) > 0:
 
@@ -898,7 +901,8 @@ def run_sweep(conn: 'connection', http_session,
                     print(f'Stop requested - releasing '
                           f'{remaining} unfinished number(s) '
                           f'of batch {batch_no}.')
-                    release_unfinished(conn, batch_no)
+                    release_unfinished(conn, batch_no,
+                                       interval=interval)
                     stopping = True
                     break
 
@@ -919,7 +923,8 @@ def run_sweep(conn: 'connection', http_session,
                                     batch_size=batch_size,
                                     min_val=cpso_start,
                                     max_val=cpso_stop,
-                                    desc=descending)
+                                    desc=descending,
+                                    interval=interval)
     return processed
 
 
@@ -938,6 +943,8 @@ def read_control(conn: 'connection'):
     # consistent across the whole fleet regardless of how each
     # machine's local timezone is set.
     variants = (
+        (f'{base_cols}, abort_check, run_from, run_until, '
+         f'interval_days, CURTIME()', 'interval'),
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'CURTIME()', 'window'),
         (f'{base_cols}, abort_check, CURTIME()', 'abort_check'),
@@ -978,13 +985,16 @@ def read_control(conn: 'connection'):
            'abort_check': None,
            'run_from': None,
            'run_until': None,
+           'interval': None,
            'now': row[-1]}
 
-    if level in ('abort_check', 'window'):
+    if level in ('abort_check', 'window', 'interval'):
         ctl['abort_check'] = row[8]
-    if level == 'window':
+    if level in ('window', 'interval'):
         ctl['run_from'] = row[9]
         ctl['run_until'] = row[10]
+    if level == 'interval':
+        ctl['interval'] = row[11]
 
     ctl['in_window'] = in_time_window(ctl['now'],
                                       ctl['run_from'],
@@ -1071,7 +1081,11 @@ def run_agent(args, conn: 'connection'):
                         check_every=(
                             ctl['abort_check']
                             if ctl['abort_check'] is not None
-                            else args.abort_check))
+                            else args.abort_check),
+                        interval=(
+                            ctl['interval']
+                            if ctl['interval'] is not None
+                            else args.interval))
 
                     after = read_control(conn)
                     if after is not None and after['go'] \
@@ -1175,6 +1189,16 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--abort',
                         action='store_true',
                         help='request abort of all running scrapes')
+    parser.add_argument('-i', '--interval', type=int,
+                        default=DEFAULT_INTERVAL_DAYS,
+                        metavar='DAYS',
+                        help='freshness window: a doctor is only '
+                             're-scraped when the last update is '
+                             'older than this many days; in '
+                             'agent mode the interval_days '
+                             'column of the control table takes '
+                             'precedence '
+                             f'(default={DEFAULT_INTERVAL_DAYS})')
     parser.add_argument('-c', '--abort-check', type=int,
                         default=0, metavar='N',
                         help='also check for an abort request '
@@ -1301,6 +1325,7 @@ if __name__ == '__main__':
                   delay=args.delay,
                   quick=args.quick,
                   perm_exclude=args.perm_exclude,
-                  check_every=args.abort_check)
+                  check_every=args.abort_check,
+                  interval=args.interval)
     curs.close()
     connect_db.close()

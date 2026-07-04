@@ -6,6 +6,11 @@ SECONDS_TO_WAIT = 10
 # towards the register site; override with --delay)
 DEFAULT_DELAY = 1.0
 
+# days before a doctor's record is considered stale and offered
+# for re-scraping (override with --interval or the control
+# table's interval_days column)
+DEFAULT_INTERVAL_DAYS = 20
+
 # --agent mode: central control table and poll cadence
 CONTROL_TBL = 'MD_scrape_control'
 AGENT_POLL_SECS = 120
