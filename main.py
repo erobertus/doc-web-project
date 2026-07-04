@@ -786,6 +786,209 @@ def process_record(conn: 'connection', cur_CPSO: int,
     return [record]
 
 
+def run_sweep(conn: 'connection', http_session,
+              cpso_start: int, cpso_stop: int, batch_size: int,
+              use_random=True, descending=False,
+              delay=DEFAULT_DELAY, quick=False,
+              perm_exclude=False, control_check=None) -> int:
+    """Work the CPSO number pool until it is exhausted. When
+    control_check is given it is consulted between batches; a
+    falsy result stops the sweep after the current batch.
+    Returns the number of doctors processed."""
+    curs = conn.cursor()
+
+    # CPSO numbers are ever-increasing; a missing number below
+    # the highest one we have ever seen is a permanent gap,
+    # while a missing number above it may belong to a future
+    # newly registered doctor
+    curs.execute(f'SELECT COALESCE(MAX({C_CPSO_NO}), 0) '
+                 f'FROM {MD_DIR_TABLE}')
+    known_max_cpso = curs.fetchone()[0]
+    print(f"Highest CPSO number in database: {known_max_cpso} "
+          f"(missing numbers below it are excluded permanently)")
+
+    processed = 0
+    scrape_one = process_record_quick if quick \
+        else process_record
+
+    workload = request_workload(conn, random=use_random,
+                                batch_size=batch_size,
+                                min_val=cpso_start,
+                                max_val=cpso_stop,
+                                desc=descending)
+
+    while len(workload[1]) > 0:
+
+        batch_no = workload[0]
+        print(f"Running batch {batch_no} "
+              f"({cpso_start}-{cpso_stop}:{batch_size})\n"
+              f"======================================")
+
+        for cpso_no in workload[1]:
+            all_recs = scrape_one(
+                conn, cpso_no,
+                batch_id=batch_no,
+                exclude_invalid=(perm_exclude or
+                                 cpso_no <= known_max_cpso),
+                session=http_session)
+
+            if len(all_recs) > 0:
+                update_record(conn, all_recs,
+                              MD_DIR_TABLE, cpso_no)
+
+                save_commit_state = conn.autocommit
+                conn.autocommit = False
+                for s in FINAL_SQL:
+                    curs.execute(s, (cpso_no,))
+
+                conn.commit()
+                conn.autocommit = save_commit_state
+
+            processed += 1
+            if delay > 0:
+                time.sleep(delay)
+
+        finish_workload(conn, batch_no)
+
+        if control_check is not None and not control_check():
+            print('Go flag cleared - stopping this sweep.')
+            break
+
+        workload = request_workload(conn, random=use_random,
+                                    batch_size=batch_size,
+                                    min_val=cpso_start,
+                                    max_val=cpso_stop,
+                                    desc=descending)
+    return processed
+
+
+def read_control(conn: 'connection'):
+    """Read the newest row of the central control table. Returns
+    a dict or None when the table is empty. The BIT columns are
+    cast to integers server-side so the connector returns plain
+    numbers."""
+    curs = conn.cursor()
+    try:
+        curs.execute(
+            f'SELECT go_flag+0, quick_mode+0, cpso_start, '
+            f'cpso_stop, batch_size, delay_sec, use_random+0, '
+            f'updated '
+            f'FROM {CONTROL_TBL} '
+            f'ORDER BY control_uno DESC LIMIT 1')
+        row = curs.fetchone()
+    finally:
+        # leave the read snapshot behind so the next poll sees
+        # fresh data (REPEATABLE READ would keep serving the old
+        # snapshot otherwise)
+        conn.commit()
+
+    if row is None:
+        return None
+
+    return {'go': bool(row[0]),
+            'quick': bool(row[1]),
+            'cpso_start': row[2] if row[2] is not None else 10000,
+            'cpso_stop': row[3] if row[3] is not None else 200000,
+            'batch_size': row[4] if row[4] is not None else 50,
+            'delay': float(row[5]) if row[5] is not None
+                     else DEFAULT_DELAY,
+            'random': bool(row[6]),
+            'updated': row[7]}
+
+
+def run_agent(args, conn: 'connection'):
+    """Unattended mode for fleet machines: poll the control table
+    and run sweeps with the parameters stored there while go_flag
+    is set. Reconnects automatically when the database connection
+    drops. Runs until interrupted (Ctrl-C / service stop)."""
+    http_session = make_session()
+    completed_marker = None      # control 'updated' stamp of the
+                                 # last fully exhausted sweep
+    completed_time = 0.0
+
+    print(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
+          f'every {args.poll_interval} sec. Ctrl-C to stop.')
+
+    while True:
+        try:
+            ctl = read_control(conn)
+
+            if ctl is None:
+                print(f'Agent: {CONTROL_TBL} is empty; waiting '
+                      f'for a control row...')
+            elif not ctl['go']:
+                completed_marker = None
+                completed_time = 0.0
+            else:
+                resweep_due = (time.time() - completed_time
+                               >= AGENT_RESWEEP_SECS)
+                if ctl['updated'] != completed_marker \
+                        or resweep_due:
+                    print(f"Agent: go! quick={ctl['quick']} "
+                          f"range={ctl['cpso_start']}-"
+                          f"{ctl['cpso_stop']} "
+                          f"batch={ctl['batch_size']} "
+                          f"delay={ctl['delay']} "
+                          f"random={ctl['random']}\n"
+                          f"======================================")
+
+                    n = run_sweep(
+                        conn, http_session,
+                        ctl['cpso_start'], ctl['cpso_stop'],
+                        ctl['batch_size'],
+                        use_random=ctl['random'],
+                        delay=ctl['delay'],
+                        quick=ctl['quick'],
+                        control_check=lambda:
+                            (read_control(conn) or {})
+                            .get('go', False))
+
+                    after = read_control(conn)
+                    if after is not None and after['go']:
+                        # pool exhausted while still 'go': note the
+                        # control stamp so we do not spin; re-sweep
+                        # when the row changes or after the idle
+                        # period
+                        completed_marker = after['updated']
+                        completed_time = time.time()
+                        print(f'Agent: pool exhausted '
+                              f'({n} processed). Idle until the '
+                              f'control row changes or '
+                              f'{AGENT_RESWEEP_SECS // 3600} h '
+                              f'passes.')
+                    else:
+                        # stopped by flag drop: forget the marker
+                        # so the next 'go' resumes immediately
+                        completed_marker = None
+                        completed_time = 0.0
+
+            time.sleep(args.poll_interval)
+
+        except mariadb.Error as e:
+            print(f'Agent: database error: {e}. '
+                  f'Reconnecting in 60 sec...')
+            try:
+                conn.close()
+            except Exception:
+                pass
+            time.sleep(60)
+            while True:
+                try:
+                    conn = mariadb.connect(
+                        user=args.db_user,
+                        password=args.db_pass,
+                        host=args.db_host,
+                        port=args.db_port,
+                        database=args.db_name,
+                        compress=True)
+                    print('Agent: reconnected.')
+                    break
+                except mariadb.Error as e2:
+                    print(f'Agent: reconnect failed: {e2}; '
+                          f'retrying in 60 sec...')
+                    time.sleep(60)
+
+
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
     # Process parameters here
@@ -840,6 +1043,20 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--abort',
                         action='store_true',
                         help='request abort of all running scrapes')
+    parser.add_argument('--agent',
+                        action='store_true',
+                        help='unattended fleet mode: poll the '
+                             f'{CONTROL_TBL} table and scrape '
+                             'with the parameters stored there '
+                             'while its go_flag is set; range/'
+                             'batch/delay/quick options on the '
+                             'command line are ignored. Runs '
+                             'until interrupted')
+    parser.add_argument('--poll-interval', type=int,
+                        default=AGENT_POLL_SECS,
+                        help='seconds between control-table '
+                             'checks in --agent mode '
+                             f'(default={AGENT_POLL_SECS})')
     parser.add_argument('-q', '--quick',
                         action='store_true',
                         help='refresh from the JSON search API '
@@ -896,18 +1113,19 @@ if __name__ == '__main__':
     BATCH_SIZE = args.batch_size
     # for cpso_no in range(108493,150000): # TEST_CPSO:
 
-    print(f"Running with following parameters:\n"
-          f"From CPSO  : {CPSO_START}\n"
-          f"To CPSO    : {CPSO_STOP}\n"
-          f"Host       : {args.db_host}\n"
-          f"Database   : {args.db_name}\n"
-          f"User       : {args.db_user}\n"
-          f"Random     : {USE_RANDOM}\n"
-          f"Batch size : {BATCH_SIZE}\n"
-          f"Delay      : {args.delay}\n"
-          f"Perm excl. : {args.perm_exclude}\n"
-          f"Quick mode : {args.quick}\n"
-          f"======================================")
+    if not args.agent:
+        print(f"Running with following parameters:\n"
+              f"From CPSO  : {CPSO_START}\n"
+              f"To CPSO    : {CPSO_STOP}\n"
+              f"Host       : {args.db_host}\n"
+              f"Database   : {args.db_name}\n"
+              f"User       : {args.db_user}\n"
+              f"Random     : {USE_RANDOM}\n"
+              f"Batch size : {BATCH_SIZE}\n"
+              f"Delay      : {args.delay}\n"
+              f"Perm excl. : {args.perm_exclude}\n"
+              f"Quick mode : {args.quick}\n"
+              f"======================================")
 
     if args.abort:
         save_commit_state = connect_db.autocommit
@@ -929,63 +1147,17 @@ if __name__ == '__main__':
         connect_db.autocommit = save_commit_state
         print("Done.")
 
+    elif args.agent:
+        run_agent(args, connect_db)
+
     else:
         http_session = make_session()
-
-        # CPSO numbers are ever-increasing; a missing number below
-        # the highest one we have ever seen is a permanent gap,
-        # while a missing number above it may belong to a future
-        # newly registered doctor
-        curs.execute(f'SELECT COALESCE(MAX({C_CPSO_NO}), 0) '
-                     f'FROM {MD_DIR_TABLE}')
-        known_max_cpso = curs.fetchone()[0]
-        print(f"Highest CPSO number in database: {known_max_cpso} "
-              f"(missing numbers below it are excluded "
-              f"permanently)")
-
-        workload = request_workload(connect_db, random=USE_RANDOM,
-                                    batch_size=BATCH_SIZE,
-                                    min_val=CPSO_START,
-                                    max_val=CPSO_STOP,
-                                    desc=args.descending)
-
-        while len(workload[1]) > 0:
-
-            batch_no = workload[0]
-            print(f"Running batch {batch_no} "
-                  f"({CPSO_START}-{CPSO_STOP}:{BATCH_SIZE})\n"
-                  f"======================================")
-            scrape_one = process_record_quick if args.quick \
-                else process_record
-
-            for cpso_no in workload[1]:
-                all_recs = scrape_one(
-                    connect_db, cpso_no,
-                    batch_id=batch_no,
-                    exclude_invalid=(args.perm_exclude or
-                                     cpso_no <= known_max_cpso),
-                    session=http_session)
-
-                if len(all_recs) > 0:
-                    update_record(connect_db, all_recs,
-                                  MD_DIR_TABLE, cpso_no)
-
-                    save_commit_state = connect_db.autocommit
-                    connect_db.autocommit = False
-                    for s in FINAL_SQL:
-                        curs.execute(s, (cpso_no,))
-
-                    connect_db.commit()
-                    connect_db.autocommit = save_commit_state
-
-                if args.delay > 0:
-                    time.sleep(args.delay)
-
-            finish_workload(connect_db, batch_no)
-            workload = request_workload(connect_db, random=USE_RANDOM,
-                                        batch_size=BATCH_SIZE,
-                                        min_val=CPSO_START,
-                                        max_val=CPSO_STOP,
-                                        desc=args.descending)
+        run_sweep(connect_db, http_session,
+                  CPSO_START, CPSO_STOP, BATCH_SIZE,
+                  use_random=USE_RANDOM,
+                  descending=args.descending,
+                  delay=args.delay,
+                  quick=args.quick,
+                  perm_exclude=args.perm_exclude)
     curs.close()
     connect_db.close()

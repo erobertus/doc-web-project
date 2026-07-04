@@ -6,6 +6,15 @@ SECONDS_TO_WAIT = 10
 # towards the register site; override with --delay)
 DEFAULT_DELAY = 1.0
 
+# --agent mode: central control table and poll cadence
+CONTROL_TBL = 'MD_scrape_control'
+AGENT_POLL_SECS = 120
+# with go_flag left ON, re-attempt a sweep this often even if the
+# control row did not change (request_workload only hands out
+# numbers not refreshed within its interval, so this keeps the
+# data continuously fresh at negligible cost)
+AGENT_RESWEEP_SECS = 6 * 3600
+
 # The new register (register.cpso.on.ca) names some reference
 # values differently from the old site. When the OLD name already
 # exists in the reference table, the alias below is used instead of

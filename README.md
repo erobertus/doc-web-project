@@ -128,6 +128,66 @@ Defaults: CPSO range 10000–200000, batch 50, 1 s delay, DB
 `faxcomet_MD_list` on `faxcomet.com` (see `-h` for the credentials
 options).
 
+### Fleet / agent mode (`--agent`)
+
+Unattended mode for running the scrape from many machines (e.g.
+one per clinic), all coordinated through the database. Each agent
+polls the `MD_scrape_control` table (every `--poll-interval`
+seconds, default 120) and, while `go_flag` is set, works the
+shared number pool with the parameters stored in the table —
+command-line range/batch/delay/quick options are ignored:
+
+```sql
+CREATE TABLE MD_scrape_control (
+  control_uno INT AUTO_INCREMENT PRIMARY KEY,
+  go_flag     BIT NOT NULL DEFAULT 0,
+  quick_mode  BIT NOT NULL DEFAULT 0,
+  cpso_start  INT DEFAULT 10000,
+  cpso_stop   INT DEFAULT 200000,
+  batch_size  INT DEFAULT 50,
+  delay_sec   FLOAT DEFAULT 1.0,
+  use_random  BIT DEFAULT 1,
+  updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+              ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT INTO MD_scrape_control (go_flag) VALUES (0);
+```
+
+Operation:
+
+- **Start a sweep**: `UPDATE MD_scrape_control SET go_flag = 1;`
+  — all idle agents pick it up within one poll interval.
+- **Stop**: `UPDATE MD_scrape_control SET go_flag = 0;` — each
+  agent stops after finishing its current batch (≈ batch_size ×
+  delay seconds). `python main.py -a` still works as the
+  emergency abort as well.
+- **Retune centrally**: change `delay_sec`, `batch_size`, range
+  or `quick_mode` in the table; agents apply the new values on
+  their next sweep (the `updated` column changing is also what
+  tells idle agents to sweep again).
+- When the pool is exhausted and `go_flag` stays on, agents idle
+  and re-attempt a sweep every 6 h (`AGENT_RESWEEP_SECS`) —
+  combined with `request_workload`'s 20-day freshness interval
+  this keeps the data continuously up to date at negligible cost.
+- Agents survive database outages (reconnect with retry) and
+  record their identity in `MD_batch_header.host`, so progress
+  per machine is visible there.
+
+Windows setup per machine (`run_agent.bat` wraps the agent with
+auto-restart):
+
+```
+pip install -r requirements.txt
+schtasks /create /tn "CPSO scrape agent" /sc onstart ^
+  /tr "C:\path\to\doc-web-project\run_agent.bat" /ru SYSTEM
+```
+
+(or point Task Scheduler at `run_agent.bat` with "Run whether
+user is logged on or not" + "Restart on failure".)
+
+With ~20 machines at the default 1 s delay the full sweep takes
+roughly 2–3 hours, at ~1 request/second per clinic IP.
+
 ## Dependencies
 
 See `requirements.txt` (`mariadb`, `requests`, `beautifulsoup4`,
