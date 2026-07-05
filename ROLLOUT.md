@@ -96,11 +96,18 @@ Do the whole installation from the **admin account** — the
 scheduled task runs as SYSTEM, so it keeps working after the
 admin logs out (or never logs in again).
 
-1. **Python 3.10+** — install from python.org as admin, tick
-   **"Install for all users"** and
-   **"Add python.exe to PATH"** (a per-user install would not be
-   visible to the SYSTEM task). Verify in a new cmd window:
-   `python --version`
+1. **Python 3.13** — use the CLASSIC installer
+   (`python-3.13.x-amd64.exe` from python.org), as admin:
+   Customize installation → tick **"Install for all users"** and
+   **"Add python.exe to PATH"** → installs to
+   `C:\Program Files\Python313`. Verify in a new cmd window:
+   `python --version`.
+   AVOID Python 3.14's new "install manager" — it defaults to a
+   per-user install under `C:\Users\<name>\AppData\...`, whose
+   PATH entry the SYSTEM task does not see (agent dies with
+   `'python' is not recognized`). If pip output mentions
+   `AppData\Local\Python`, you got the wrong installer —
+   uninstall and use the classic one.
 2. **Get the code** (note the branch — the repo default is stale):
    ```
    cd C:\
