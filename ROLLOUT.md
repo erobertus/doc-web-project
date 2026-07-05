@@ -101,29 +101,35 @@ window (right-click cmd → "Run as administrator" — an admin
 account with a normal prompt is NOT enough). The scheduled task
 runs as SYSTEM, so it keeps working after the admin logs out.
 
-1. **Get `bootstrap_agent.bat` onto the machine** — that single
-   file is the only thing you need (USB stick, RDP paste, or
-   download it straight from GitHub in an elevated cmd):
+1. **Get `bootstrap_agent.bat` onto the machine and run it** —
+   that single file is the only thing you need. Fetch and launch
+   it in one paste (`curl` ships with Windows 10/11):
+   ```
+   curl -L -o %TEMP%\bootstrap_agent.bat https://raw.githubusercontent.com/erobertus/doc-web-project/geocode_on_the_fly/bootstrap_agent.bat && %TEMP%\bootstrap_agent.bat
+   ```
+   Or as two steps, optionally passing the clinic name (and
+   knock sequence) up front instead of at the prompts:
    ```
    curl -L -o %TEMP%\bootstrap_agent.bat https://raw.githubusercontent.com/erobertus/doc-web-project/geocode_on_the_fly/bootstrap_agent.bat
-   %TEMP%\bootstrap_agent.bat "Clinic-Newmarket"
+   %TEMP%\bootstrap_agent.bat "Clinic-Newmarket" "tcp:7001,8002,9003"
    ```
-   (name argument optional — it asks interactively when omitted)
+   (no git needed beforehand — the bootstrap installs it; USB
+   stick / RDP paste also work if the machine has no internet to
+   GitHub for the .bat itself.)
 2. **The bootstrap does everything**: installs git if missing
-   (silent, pinned version), clones the repo to `C:\cpso` (or
+   (latest release, silent), clones the repo to `C:\cpso` (or
    fast-forwards an existing clone — re-running it doubles as
    the update mechanism), then hands over to
-   `deploy_agent.bat`:
-   `deploy_agent.bat` (pick a unique clinic name per machine)
-   does everything and verifies each step: elevation; Python —
-   uses a runtime bundled at `C:\cpso\python\` if present, else
-   an existing all-users install, else **downloads Python from
-   python.org and silently installs it for all users**
-   (version pinned in `PY_VERSION` at the top of the script);
-   dependencies into a SYSTEM-visible site-packages (catches
-   the per-user shadowing trap); read-only permissions for
-   clinic users; agent naming; scheduled-task creation; and a
-   smoke check that the agent process is up and polling. It
+   `deploy_agent.bat`, which verifies each step: elevation;
+   Python — uses a runtime bundled at `C:\cpso\python\` if
+   present, else an existing all-users install, else
+   **downloads the latest Python from python.org and silently
+   installs it for all users**; dependencies into a
+   SYSTEM-visible site-packages (catches the per-user shadowing
+   trap); read-only permissions for clinic users; agent naming
+   and knock sequence (prompted if not given); scheduled-task
+   creation; and a smoke check that the agent process is up and
+   polling. It
    stops with a specific remedy message on any failure and is
    safe to re-run after fixing.
 
