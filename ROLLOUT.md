@@ -92,25 +92,45 @@ UPDATE MD_scrape_control SET
 
 ## 1. Per-machine install (each clinic PC)
 
-1. **Python 3.10+** — install from python.org, tick
-   **"Add python.exe to PATH"**. Verify in a new cmd window:
+Do the whole installation from the **admin account** — the
+scheduled task runs as SYSTEM, so it keeps working after the
+admin logs out (or never logs in again).
+
+1. **Python 3.10+** — install from python.org as admin, tick
+   **"Install for all users"** and
+   **"Add python.exe to PATH"** (a per-user install would not be
+   visible to the SYSTEM task). Verify in a new cmd window:
    `python --version`
 2. **Get the code** (note the branch — the repo default is stale):
    ```
    cd C:\
    git clone -b geocode_on_the_fly https://github.com/erobertus/doc-web-project.git cpso
    ```
-   No git on the machine? Copy the project folder from a USB
-   stick / network share instead — just keep it at a fixed path
-   like `C:\cpso`.
-3. **Dependencies**:
+   Keep it at a machine-wide path like `C:\cpso` — not under a
+   user profile. No git on the machine? Copy the project folder
+   from a USB stick / network share instead.
+3. **Dependencies** (from an **elevated** prompt, so they land in
+   the global site-packages that SYSTEM sees):
    ```
    cd C:\cpso
    pip install -r requirements.txt
    ```
    If `mariadb` fails to install, install the
    "Microsoft Visual C++ Redistributable (x64)" and retry.
-4. **Connectivity check** (go_flag is still 0, so nothing is
+4. **Permissions** (recommended): the Windows default ACL under
+   `C:\` usually lets Authenticated Users MODIFY subfolders —
+   i.e. the non-admin clinic account could edit scripts that run
+   as SYSTEM and contain the DB credentials. Tighten:
+   ```
+   icacls C:\cpso /inheritance:d
+   icacls C:\cpso /remove:g "Authenticated Users" /t
+   ```
+   Result: Administrators + SYSTEM keep full control, regular
+   users can still READ (view agent.log) but not modify the
+   code; `git pull` from the admin account still works. Check
+   with `icacls C:\cpso` — if there is no
+   `Authenticated Users:...(M)` line to begin with, skip this.
+5. **Connectivity check** (go_flag is still 0, so nothing is
    scraped — you should see it polling and staying idle):
    ```
    python main.py --agent --poll-interval 15
@@ -120,17 +140,27 @@ UPDATE MD_scrape_control SET
    - Database error here = the machine cannot reach
      `faxcomet.com:3306` (clinic firewall) — fix before
      continuing.
-5. **Schedule it** (admin cmd window):
+6. **Schedule it** (admin cmd window):
    ```
    schtasks /create /tn "CPSO scrape agent" /sc onstart ^
      /tr "C:\cpso\run_agent.bat" /ru SYSTEM
    schtasks /run /tn "CPSO scrape agent"
    ```
-   The agent now runs headless, survives reboots, restarts itself
-   after crashes, and logs everything to `C:\cpso\agent.log`.
+   The agent now runs headless (no visible window), survives
+   reboots and logouts, restarts itself after crashes, and logs
+   everything to `C:\cpso\agent.log`.
+7. **Verify, then log out**: `C:\cpso\agent.log` should show
+   `Agent mode: polling MD_scrape_control...` within a minute,
+   and the machine appears centrally:
+   ```sql
+   SELECT host, MAX(log_time) FROM MD_scrape_log GROUP BY host;
+   ```
+   Log the admin out, wait a few minutes, re-run the query —
+   the timestamp keeps advancing.
 
 Repeat on the next machine. Machines are identical — no
-per-machine configuration.
+per-machine configuration. Future code updates: `git pull` from
+the admin account (regular users have read-only access).
 
 ---
 
