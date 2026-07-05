@@ -484,7 +484,8 @@ def request_workload(conn: 'connection',
                      interval=DEFAULT_INTERVAL_DAYS,
                      min_val=10000,
                      max_val=150000,
-                     desc=False) -> tuple:
+                     desc=False,
+                     include_excluded=False) -> tuple:
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
@@ -550,13 +551,20 @@ def request_workload(conn: 'connection',
     else:
         order_clause = 'ORDER BY cpso_no'
 
+    # normally a number is skipped when it was scraped within the
+    # freshness window OR is permanently excluded (a known gap);
+    # include_excluded drops the PermExcluded half so those gaps
+    # are re-checked too, still subject to the freshness window
+    fresh_cond = 'updated_date_time > (NOW() - INTERVAL ' \
+                 f'{interval} DAY)'
+    if not include_excluded:
+        fresh_cond = f'({fresh_cond} OR PermExcluded)'
+
     stmt = f'SELECT cpso_no FROM _TMP_{batch_id} ' \
            f'WHERE cpso_no not in (' \
            f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
            f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
-           'AND (updated_date_time > (NOW() - INTERVAL ' \
-           f'{interval} DAY) ' \
-           'OR PermExcluded) ) ' \
+           f'AND {fresh_cond} ) ' \
            f'{order_clause} ' \
            f'LIMIT {batch_size}'
 
@@ -1111,7 +1119,8 @@ def run_sweep(conn: 'connection', http_session,
               delay=DEFAULT_DELAY, quick=False,
               perm_exclude=False, control_check=None,
               check_every=0,
-              interval=DEFAULT_INTERVAL_DAYS) -> int:
+              interval=DEFAULT_INTERVAL_DAYS,
+              include_excluded=False) -> int:
     """Work the CPSO number pool until it is exhausted. When
     control_check is given it is consulted between batches; a
     falsy result stops the sweep after the current batch. With
@@ -1149,7 +1158,8 @@ def run_sweep(conn: 'connection', http_session,
                                 min_val=cpso_start,
                                 max_val=cpso_stop,
                                 desc=descending,
-                                interval=interval)
+                                interval=interval,
+                                include_excluded=include_excluded)
 
     while len(workload[1]) > 0:
 
@@ -1259,7 +1269,8 @@ def run_sweep(conn: 'connection', http_session,
                                     min_val=cpso_start,
                                     max_val=cpso_stop,
                                     desc=descending,
-                                    interval=interval)
+                                    interval=interval,
+                                    include_excluded=include_excluded)
 
     DB_LOG.log('INFO', f'Sweep finished: {processed} processed')
     return processed
@@ -1280,6 +1291,9 @@ def read_control(conn: 'connection'):
     # consistent across the whole fleet regardless of how each
     # machine's local timezone is set.
     variants = (
+        (f'{base_cols}, abort_check, run_from, run_until, '
+         f'interval_days, log_verbose+0, auto_update_hrs, '
+         f'include_excluded+0, CURTIME()', 'exclude'),
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, log_verbose+0, auto_update_hrs, '
          f'CURTIME()', 'update'),
@@ -1330,10 +1344,11 @@ def read_control(conn: 'connection'):
            'interval': None,
            'log_verbose': None,
            'auto_update_hrs': None,
+           'include_excluded': False,
            'now': row[-1]}
 
     optional = ('abort_check', 'window', 'interval', 'verbose',
-                'update')
+                'update', 'exclude')
     if level in optional:
         ctl['abort_check'] = row[8]
     if level in optional[1:]:
@@ -1343,8 +1358,10 @@ def read_control(conn: 'connection'):
         ctl['interval'] = row[11]
     if level in optional[3:]:
         ctl['log_verbose'] = bool(row[12])
-    if level == 'update':
+    if level in optional[4:]:
         ctl['auto_update_hrs'] = row[13]
+    if level == 'exclude':
+        ctl['include_excluded'] = bool(row[14])
 
     ctl['in_window'] = in_time_window(ctl['now'],
                                       ctl['run_from'],
@@ -1648,7 +1665,8 @@ def run_agent(args, conn: 'connection'):
                         interval=(
                             ctl['interval']
                             if ctl['interval'] is not None
-                            else args.interval))
+                            else args.interval),
+                        include_excluded=ctl['include_excluded'])
 
                     after = read_control(conn)
                     if after is not None and after['go'] \
@@ -1810,6 +1828,15 @@ if __name__ == '__main__':
                              'to the central log); in agent mode '
                              'the log_verbose control column '
                              'takes precedence')
+    parser.add_argument('--include-excluded',
+                        action='store_true',
+                        help='also re-scrape permanently excluded '
+                             'CPSO numbers (known gaps below the '
+                             'database maximum); normally skipped. '
+                             'Still subject to the freshness '
+                             'window. Agent mode is governed by '
+                             'the include_excluded control column '
+                             'instead of this flag')
     parser.add_argument('-i', '--interval', type=int,
                         default=DEFAULT_INTERVAL_DAYS,
                         metavar='DAYS',
@@ -1971,6 +1998,7 @@ if __name__ == '__main__':
                   quick=args.quick,
                   perm_exclude=args.perm_exclude,
                   check_every=args.abort_check,
-                  interval=args.interval)
+                  interval=args.interval,
+                  include_excluded=args.include_excluded)
     curs.close()
     connect_db.close()

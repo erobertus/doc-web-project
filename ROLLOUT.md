@@ -68,6 +68,12 @@ ALTER TABLE MD_batch_header MODIFY host VARCHAR(128) DEFAULT NULL;
 ALTER TABLE MD_scrape_control
   ADD COLUMN auto_update_hrs INT DEFAULT 0 AFTER log_verbose;
 
+-- re-scrape permanently-excluded numbers (known gaps) when set;
+-- normally those are skipped forever
+ALTER TABLE MD_scrape_control
+  ADD COLUMN include_excluded BIT NOT NULL DEFAULT b'0'
+      AFTER auto_update_hrs;
+
 -- central fleet commands: push code updates and self-destruct to
 -- machines by host pattern (agents fall back to disabled if this
 -- table is absent)
@@ -282,6 +288,14 @@ UPDATE MD_scrape_control SET quick_mode = 1;   -- or 0
 -- discovery pass for NEW doctors (sequential over the top range)
 UPDATE MD_scrape_control SET use_random = 0,
   cpso_start = 154000, cpso_stop = 200000;
+
+-- re-check permanently-excluded numbers (known gaps below the DB
+-- max). Use sequential (use_random=0) so the gaps are actually
+-- visited; still honours the freshness window. Turn back off when
+-- the verification pass is done.
+UPDATE MD_scrape_control SET include_excluded = 1, use_random = 0;
+-- ... later:
+UPDATE MD_scrape_control SET include_excluded = 0;
 
 -- who is working right now (last 24 h, per machine)
 SELECT host, COUNT(*) batches, MAX(start_date) last_start,
