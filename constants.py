@@ -15,6 +15,10 @@ DEFAULT_INTERVAL_DAYS = 20
 # console-only logging when the table does not exist)
 LOG_TBL = 'MD_scrape_log'
 
+# per-agent liveness table (one row per host, upserted every poll
+# so live machines can be listed; optional - degrades gracefully)
+AGENTS_TBL = 'MD_scrape_agents'
+
 # a batch that is still open but has produced no completed
 # numbers for this long belongs to a dead client and is reaped
 # (closed + its unfinished numbers released); 0 disables reaping

@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS MD_scrape_log (
 -- already have MD_scrape_log without version? add the column:
 ALTER TABLE MD_scrape_log ADD COLUMN version VARCHAR(40) NULL AFTER host;
 
+-- per-agent liveness: one row per host, refreshed every poll
+-- (so idle agents still show as alive). Optional - agents skip
+-- it gracefully if absent.
+CREATE TABLE IF NOT EXISTS MD_scrape_agents (
+  host      VARCHAR(128) NOT NULL PRIMARY KEY,
+  version   VARCHAR(40) NULL,
+  state     VARCHAR(20) NULL,   -- idle / waiting-window / sweeping / no-control
+  detail    VARCHAR(255) NULL,
+  last_seen TIMESTAMP NOT NULL DEFAULT current_timestamp()
+            ON UPDATE current_timestamp(),
+  KEY idx_last_seen (last_seen)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- ONE-TIME charset conversion: the new register serves proper
 -- Unicode (e.g. Riga Stradins with macrons), which the legacy
 -- latin1 tables can neither compare against nor store. Run once
@@ -326,7 +339,21 @@ WHERE level IN ('ERROR', 'WARN')
   AND log_time >= NOW() - INTERVAL 1 DAY
 ORDER BY log_time DESC;
 
--- last sign of life + deployed version per machine
+-- ACTIVE agents right now (heartbeat within the last 5 min).
+-- This is the reliable "who is alive" list - idle agents still
+-- heartbeat every poll, unlike the event log.
+SELECT host, version, state, last_seen
+FROM MD_scrape_agents
+WHERE last_seen >= NOW() - INTERVAL 5 MINUTE
+ORDER BY last_seen DESC;
+
+-- agents that have gone silent (were seen, but not lately)
+SELECT host, version, state, last_seen
+FROM MD_scrape_agents
+WHERE last_seen < NOW() - INTERVAL 5 MINUTE
+ORDER BY last_seen DESC;
+
+-- last sign of life + deployed version per machine (event log)
 SELECT host, version, MAX(log_time) last_seen
 FROM MD_scrape_log GROUP BY host, version ORDER BY last_seen;
 

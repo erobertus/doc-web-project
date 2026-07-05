@@ -74,12 +74,42 @@ class DbLogger:
         self.version = 'unknown'
         self._version_col = True     # flips off if the column is
                                      # absent on this database
+        self._agents_tbl = True      # flips off if the liveness
+                                     # table does not exist
         # CPSO_AGENT_NAME (e.g. 'Clinic-Newmarket') beats the bare
         # Windows machine name, which says nothing about location
         self.host = os.environ.get('CPSO_AGENT_NAME') \
             or socket.gethostname()
         self._origin_added = bool(
             os.environ.get('CPSO_AGENT_NAME'))
+
+    def heartbeat(self, state, detail=None):
+        """Upsert this agent's liveness row in MD_scrape_agents
+        (one row per host, refreshed every poll) so the fleet's
+        active machines can be listed at a glance. Best-effort and
+        independent of log(): a missing table or any error is
+        swallowed and never disables logging."""
+        if not self.enabled or not self._agents_tbl:
+            return
+        if self.conn is None and not self._connect():
+            return
+        try:
+            curs = self.conn.cursor()
+            curs.execute(
+                f'INSERT INTO {AGENTS_TBL} '
+                f'(host, version, state, detail) '
+                f'VALUES (?, ?, ?, ?) '
+                f'ON DUPLICATE KEY UPDATE '
+                f'version = VALUES(version), '
+                f'state = VALUES(state), '
+                f'detail = VALUES(detail), last_seen = NOW()',
+                (self.host, self.version, state,
+                 (detail or '')[:255]))
+        except mariadb.Error as e:
+            if getattr(e, 'errno', None) == 1146:
+                self._agents_tbl = False      # table not set up
+            else:
+                self.conn = None              # reconnect next time
 
     def debug(self, message, cpso_no=None, batch_uno=None):
         """Per-doctor detail rows; written only in verbose mode
@@ -1731,6 +1761,10 @@ def run_agent(args, conn: 'connection'):
                           f"======================================")
 
                     def keep_running():
+                        # also refreshes liveness during long
+                        # sweeps (called between batches and at
+                        # the abort-check cadence)
+                        DB_LOG.heartbeat('sweeping')
                         c = read_control(conn)
                         return (c is not None and c['go']
                                 and c['in_window']
@@ -1774,6 +1808,18 @@ def run_agent(args, conn: 'connection'):
                         # as soon as go/window allows
                         completed_marker = None
                         completed_time = 0.0
+
+            # liveness heartbeat: one upserted row per host so the
+            # fleet's live machines can be listed even while idle
+            if ctl is None:
+                hb_state = 'no-control'
+            elif not ctl['go']:
+                hb_state = 'idle'
+            elif not ctl['in_window']:
+                hb_state = 'waiting-window'
+            else:
+                hb_state = 'sweeping'
+            DB_LOG.heartbeat(hb_state)
 
             # hand control back to run_agent.bat so it can rotate
             # the (Windows-locked) local log, then restart us
