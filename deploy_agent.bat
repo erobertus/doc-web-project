@@ -106,6 +106,16 @@ if errorlevel 1 (
 )
 echo [ ok ] dependencies in a SYSTEM-visible location
 
+rem --- 2b. persist the port-knock sequence if provided --------
+rem  Set it once in this elevated session before running deploy:
+rem    set CPSO_KNOCK=tcp:7001,8002,9003
+rem  (shared across the fleet; opens the DB firewall for each
+rem   clinic's dynamic IP)
+if defined CPSO_KNOCK (
+    setx CPSO_KNOCK "%CPSO_KNOCK%" /M >nul
+    echo [ ok ] port-knock sequence stored machine-wide
+)
+
 rem --- 3. ACL hardening: clinic users read-only ---------------
 icacls "%~dp0." /inheritance:d >nul
 icacls "%~dp0." /remove:g "Authenticated Users" /t >nul 2>&1
@@ -187,7 +197,8 @@ schtasks /end /tn "CPSO scrape agent" >nul 2>&1
 schtasks /delete /tn "CPSO scrape agent" /f >nul 2>&1
 echo [ ok ] scheduled task removed
 reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v CPSO_AGENT_NAME /f >nul 2>&1
-echo [ ok ] agent name removed
+reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v CPSO_KNOCK /f >nul 2>&1
+echo [ ok ] agent name and knock sequence removed
 set "TARGET=%~dp0"
 set "TARGET=%TARGET:~0,-1%"
 echo [ ok ] deleting %TARGET% in a few seconds...

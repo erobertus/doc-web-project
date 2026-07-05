@@ -149,6 +149,51 @@ Notes:
 
 ---
 
+## 1b. Port knocking (clinics behind a dynamic-IP firewall)
+
+If the database server keeps 3306 closed and only opens it to
+known IPs, the agents cannot be allow-listed statically (clinic
+IPs are dynamic). Instead the DB server runs a knock daemon and
+each agent knocks to authorize its CURRENT IP whenever a
+connection fails.
+
+**Server side (faxcomet, once)** — e.g. `knockd`:
+
+```
+# /etc/knockd.conf
+[options]
+    UseSyslog
+
+[openMariaDB]
+    sequence      = 7001,8002,9003
+    seq_timeout   = 15
+    tcpflags      = syn
+    command       = /sbin/iptables -I INPUT -s %IP% -p tcp --dport 3306 -j ACCEPT
+    cmd_timeout   = 30
+    stop_command  = /sbin/iptables -D INPUT -s %IP% -p tcp --dport 3306 -j ACCEPT
+```
+
+The firewall must also keep ESTABLISHED connections open
+(`-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT`), so a
+connection made during the 30 s window keeps working after the
+rule is withdrawn — the long-lived agent only re-knocks when its
+socket actually drops (e.g. its IP changed).
+
+**Agent side** — set the sequence once per machine (a shared
+secret; keep it out of the repo). In the elevated deploy window,
+BEFORE running deploy_agent.bat:
+
+```
+set CPSO_KNOCK=tcp:7001,8002,9003
+```
+
+deploy_agent.bat then persists it machine-wide and the agent
+knocks automatically on any failed DB connection. (Already
+deployed a machine? `setx CPSO_KNOCK "tcp:7001,8002,9003" /M`
+then restart the task.) For a manual run: `--knock
+"tcp:7001,8002,9003"`. Default protocol is tcp; prefix `udp:` for
+UDP knocks. Leaving CPSO_KNOCK unset disables knocking entirely.
+
 ## 2. Pilot (one machine, ~15 minutes)
 
 With ONE machine's agent running and the rest not installed yet:

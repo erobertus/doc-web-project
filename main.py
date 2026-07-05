@@ -16,6 +16,26 @@ from GeoCoding import get_geocode_db_uno
 from cpso_site import (make_session, fetch_physician_page,
                        parse_physician_page, fetch_search_result,
                        search_result_location, CpsoFetchError)
+from knock import knock, knock_config_from_env
+
+
+def db_connect(**conn_params):
+    """mariadb.connect with a port-knock fallback for clinics
+    behind a dynamic-IP firewall. If the first attempt fails and a
+    knock sequence is configured (CPSO_KNOCK), knock the firewall
+    to authorize this machine's current IP, then retry once. When
+    no sequence is configured this is a plain mariadb.connect."""
+    try:
+        return mariadb.connect(**conn_params)
+    except mariadb.Error:
+        ports, proto, delay = knock_config_from_env()
+        if not ports:
+            raise
+        host = conn_params.get('host')
+        print(f'DB unreachable - port-knocking {host} '
+              f'({proto} {ports}) to authorize this IP...')
+        knock(host, ports, proto, delay)
+        return mariadb.connect(**conn_params)
 
 
 class DbLogger:
@@ -52,8 +72,8 @@ class DbLogger:
 
     def _connect(self, silent=True) -> bool:
         try:
-            self.conn = mariadb.connect(autocommit=True,
-                                        **self.params)
+            self.conn = db_connect(autocommit=True,
+                                   **self.params)
             if not self._origin_added:
                 # append the connection origin as the server sees
                 # it (clinic public IP / reverse DNS) - the bare
@@ -1408,7 +1428,7 @@ def run_agent(args, conn: 'connection'):
             time.sleep(60)
             while True:
                 try:
-                    conn = mariadb.connect(
+                    conn = db_connect(
                         user=args.db_user,
                         password=args.db_pass,
                         host=args.db_host,
@@ -1499,6 +1519,20 @@ if __name__ == '__main__':
                              'time a client requests a batch; '
                              '0 disables '
                              f'(default={STALE_BATCH_MINUTES})')
+    parser.add_argument('--knock', type=str, default=None,
+                        metavar='SEQ',
+                        help='port-knock sequence to open the '
+                             'database firewall for this '
+                             "machine's current IP when a "
+                             'connection fails (clinics behind a '
+                             'dynamic-IP firewall). Format '
+                             '"[proto:]p1,p2,p3" e.g. '
+                             '"tcp:7001,8002,9003". Overrides the '
+                             'CPSO_KNOCK environment variable')
+    parser.add_argument('--knock-delay', type=float, default=None,
+                        metavar='SEC',
+                        help='seconds between individual knocks '
+                             '(default 0.3)')
     parser.add_argument('-v', '--verbose-log',
                         action='store_true',
                         help='also write each doctor\'s summary '
@@ -1578,6 +1612,13 @@ if __name__ == '__main__':
 
     STALE_MINUTES_ACTIVE = args.stale_minutes
 
+    # CLI knock options feed the same env-based config the knock
+    # helper reads, so there is one code path
+    if args.knock is not None:
+        os.environ['CPSO_KNOCK'] = args.knock
+    if args.knock_delay is not None:
+        os.environ['CPSO_KNOCK_DELAY'] = str(args.knock_delay)
+
     # central fleet log (best-effort; falls back to console)
     DB_LOG.init(user=args.db_user,
                 password=args.db_pass,
@@ -1588,7 +1629,7 @@ if __name__ == '__main__':
 
     # Connect to MariaDB Platform
     try:
-        connect_db = mariadb.connect(
+        connect_db = db_connect(
             user=args.db_user,
             password=args.db_pass,
             host=args.db_host,
