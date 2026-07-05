@@ -101,14 +101,19 @@ window (right-click cmd → "Run as administrator" — an admin
 account with a normal prompt is NOT enough). The scheduled task
 runs as SYSTEM, so it keeps working after the admin logs out.
 
-1. **git** (git-scm.com, defaults are fine) — the only
-   prerequisite; Python is handled by the deploy script.
-2. **Clone + deploy** (note the branch — the repo default is
-   stale):
+1. **Get `bootstrap_agent.bat` onto the machine** — that single
+   file is the only thing you need (USB stick, RDP paste, or
+   download it straight from GitHub in an elevated cmd):
    ```
-   git clone -b geocode_on_the_fly https://github.com/erobertus/doc-web-project.git C:\cpso
-   C:\cpso\deploy_agent.bat "Clinic-Newmarket"
+   curl -L -o %TEMP%\bootstrap_agent.bat https://raw.githubusercontent.com/erobertus/doc-web-project/geocode_on_the_fly/bootstrap_agent.bat
+   %TEMP%\bootstrap_agent.bat "Clinic-Newmarket"
    ```
+   (name argument optional — it asks interactively when omitted)
+2. **The bootstrap does everything**: installs git if missing
+   (silent, pinned version), clones the repo to `C:\cpso` (or
+   fast-forwards an existing clone — re-running it doubles as
+   the update mechanism), then hands over to
+   `deploy_agent.bat`:
    `deploy_agent.bat` (pick a unique clinic name per machine)
    does everything and verifies each step: elevation; Python —
    uses a runtime bundled at `C:\cpso\python\` if present, else
