@@ -146,9 +146,12 @@ admin logs out (or never logs in again).
    ```
    Result: Administrators + SYSTEM keep full control, regular
    users can still READ (view agent.log) but not modify the
-   code; `git pull` from the admin account still works. Check
-   with `icacls C:\cpso` — if there is no
-   `Authenticated Users:...(M)` line to begin with, skip this.
+   code. Note UAC: after this, `git pull` (and any other write
+   to C:\cpso) needs an ELEVATED prompt — a normal prompt under
+   the admin account runs with a filtered token and is
+   effectively read-only here. Check with `icacls C:\cpso` —
+   if there is no `Authenticated Users:...(M)` line to begin
+   with, skip this.
 5. **Connectivity check** (go_flag is still 0, so nothing is
    scraped — you should see it polling and staying idle):
    ```
