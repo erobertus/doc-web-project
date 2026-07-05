@@ -71,6 +71,9 @@ class DbLogger:
         self.verbose = False
         self.conn = None
         self.params = None
+        self.version = 'unknown'
+        self._version_col = True     # flips off if the column is
+                                     # absent on this database
         # CPSO_AGENT_NAME (e.g. 'Clinic-Newmarket') beats the bare
         # Windows machine name, which says nothing about location
         self.host = os.environ.get('CPSO_AGENT_NAME') \
@@ -88,6 +91,7 @@ class DbLogger:
     def init(self, **conn_params):
         self.params = conn_params
         self.enabled = True
+        self.version = get_agent_version()
         self._connect(silent=False)
 
     def _connect(self, silent=True) -> bool:
@@ -120,21 +124,39 @@ class DbLogger:
     def log(self, level, message, cpso_no=None, batch_uno=None):
         if not self.enabled:
             return
-        for attempt in (1, 2):
+        attempt = 0
+        while attempt < 2:
+            attempt += 1
             if self.conn is None and not self._connect():
                 return
             try:
                 curs = self.conn.cursor()
-                curs.execute(
-                    f'INSERT INTO {LOG_TBL} '
-                    f'(host, level, batch_uno, cpso_no, message) '
-                    f'VALUES (?, ?, ?, ?, ?)',
-                    (self.host, level, batch_uno, cpso_no,
-                     str(message)[:60000]))
+                if self._version_col:
+                    curs.execute(
+                        f'INSERT INTO {LOG_TBL} (host, version, '
+                        f'level, batch_uno, cpso_no, message) '
+                        f'VALUES (?, ?, ?, ?, ?, ?)',
+                        (self.host, self.version, level,
+                         batch_uno, cpso_no,
+                         str(message)[:60000]))
+                else:
+                    curs.execute(
+                        f'INSERT INTO {LOG_TBL} (host, level, '
+                        f'batch_uno, cpso_no, message) '
+                        f'VALUES (?, ?, ?, ?, ?)',
+                        (self.host, level, batch_uno, cpso_no,
+                         str(message)[:60000]))
                 return
             except mariadb.Error as e:
+                # 1054 = no 'version' column on this DB: drop it
+                # and retry without counting as a failure
+                if getattr(e, 'errno', None) == 1054 \
+                        and self._version_col:
+                    self._version_col = False
+                    attempt -= 1
+                    continue
                 self.conn = None      # reconnect once, then stop
-                if attempt == 2:
+                if attempt >= 2:
                     self.enabled = False
                     print(f'Central log disabled ({e}); '
                           f'logging to console only.')
@@ -1369,6 +1391,23 @@ def _find_git():
         except (OSError, subprocess.SubprocessError):
             continue
     return None
+
+
+def get_agent_version() -> str:
+    """Short git commit hash of the deployed code, for the version
+    column in MD_scrape_log. 'nogit'/'unknown' when unavailable."""
+    git = _find_git()
+    if git is None:
+        return 'nogit'
+    try:
+        r = subprocess.run([git, '-C', REPO_DIR, 'rev-parse',
+                            '--short', 'HEAD'],
+                           capture_output=True, text=True,
+                           timeout=15, creationflags=_NO_WINDOW)
+        v = (r.stdout or '').strip()
+        return v[:40] if v else 'unknown'
+    except (OSError, subprocess.SubprocessError):
+        return 'unknown'
 
 
 def git_pull() -> tuple:

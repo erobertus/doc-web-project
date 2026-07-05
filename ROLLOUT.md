@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS MD_scrape_log (
   log_uno   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   log_time  TIMESTAMP NOT NULL DEFAULT current_timestamp(),
   host      VARCHAR(128) NOT NULL,
+  version   VARCHAR(40) NULL,       -- deployed git commit (short)
   level     VARCHAR(8) NOT NULL DEFAULT 'INFO',
   batch_uno INT NULL DEFAULT NULL,
   cpso_no   INT NULL DEFAULT NULL,
@@ -41,6 +42,8 @@ CREATE TABLE IF NOT EXISTS MD_scrape_log (
   KEY idx_host  (host, log_time),
   KEY idx_cpso  (cpso_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+-- already have MD_scrape_log without version? add the column:
+ALTER TABLE MD_scrape_log ADD COLUMN version VARCHAR(40) NULL AFTER host;
 
 -- ONE-TIME charset conversion: the new register serves proper
 -- Unicode (e.g. Riga Stradins with macrons), which the legacy
@@ -299,9 +302,16 @@ WHERE level IN ('ERROR', 'WARN')
   AND log_time >= NOW() - INTERVAL 1 DAY
 ORDER BY log_time DESC;
 
--- last sign of life per machine
-SELECT host, MAX(log_time) last_seen
-FROM MD_scrape_log GROUP BY host ORDER BY last_seen;
+-- last sign of life + deployed version per machine
+SELECT host, version, MAX(log_time) last_seen
+FROM MD_scrape_log GROUP BY host, version ORDER BY last_seen;
+
+-- which agent versions are live across the fleet (spot laggards
+-- after pushing an 'update' command)
+SELECT version, COUNT(DISTINCT host) machines, MAX(log_time) newest
+FROM MD_scrape_log
+WHERE log_time >= NOW() - INTERVAL 1 DAY
+GROUP BY version ORDER BY newest DESC;
 
 -- per-doctor detail in the central log (DEBUG rows; a full
 -- sweep adds one row per doctor - turn off when not needed)
