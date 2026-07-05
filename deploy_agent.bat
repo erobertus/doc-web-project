@@ -2,8 +2,12 @@
 rem ============================================================
 rem  CPSO scrape agent - deployment and lifecycle
 rem  Usage (ELEVATED cmd):
-rem    deploy_agent.bat ["Clinic-Name"]  full deployment; asks
-rem                                      for the name when omitted
+rem    deploy_agent.bat ["Clinic-Name"] ["Knock-Seq"]
+rem                                      full deployment; asks for
+rem                                      the name and knock
+rem                                      sequence when omitted.
+rem                                      QUOTE the knock sequence
+rem                                      - it contains commas.
 rem    deploy_agent.bat disable          stop agent + disable the
 rem                                      task, keep installation
 rem    deploy_agent.bat enable           re-enable + start agent
@@ -106,14 +110,35 @@ if errorlevel 1 (
 )
 echo [ ok ] dependencies in a SYSTEM-visible location
 
-rem --- 2b. persist the port-knock sequence if provided --------
-rem  Set it once in this elevated session before running deploy:
-rem    set CPSO_KNOCK=tcp:7001,8002,9003
-rem  (shared across the fleet; opens the DB firewall for each
-rem   clinic's dynamic IP)
-if defined CPSO_KNOCK (
-    setx CPSO_KNOCK "%CPSO_KNOCK%" /M >nul
+rem --- 2b. port-knock sequence --------------------------------
+rem  Opens the DB firewall for this clinic's dynamic IP; a
+rem  fleet-wide shared secret. Sourced in order: arg 2 (quoted),
+rem  the CPSO_KNOCK env var, the value already stored on this
+rem  machine (kept as-is on a re-deploy), else an interactive
+rem  prompt. Format "[proto:]p1,p2,p3" e.g. "tcp:7001,8002,9003".
+set "EXISTING_KNOCK="
+for /f "tokens=2,*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v CPSO_KNOCK 2^>nul ^| find /i "CPSO_KNOCK"') do set "EXISTING_KNOCK=%%b"
+
+set "KNOCK=%~2"
+if not defined KNOCK if defined CPSO_KNOCK set "KNOCK=%CPSO_KNOCK%"
+if not defined KNOCK if defined EXISTING_KNOCK (
+    set "KNOCK=%EXISTING_KNOCK%"
+    echo [ ok ] keeping the port-knock sequence already on this machine
+)
+if not defined KNOCK (
+    echo.
+    echo Port-knock sequence opens the DB firewall for this
+    echo clinic's dynamic IP - a shared fleet-wide value.
+    echo Example: tcp:7001,8002,9003
+    set /p KNOCK=Knock sequence [Enter = no knocking]:
+)
+if defined KNOCK (
+    setx CPSO_KNOCK "%KNOCK%" /M >nul
     echo [ ok ] port-knock sequence stored machine-wide
+) else (
+    echo [warn] no port knocking - agents assume the DB firewall
+    echo        already allows this machine. Set it later with:
+    echo          setx CPSO_KNOCK "tcp:7001,8002,9003" /M
 )
 
 rem --- 3. ACL hardening: clinic users read-only ---------------

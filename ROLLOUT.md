@@ -179,20 +179,21 @@ connection made during the 30 s window keeps working after the
 rule is withdrawn — the long-lived agent only re-knocks when its
 socket actually drops (e.g. its IP changed).
 
-**Agent side** — set the sequence once per machine (a shared
-secret; keep it out of the repo). In the elevated deploy window,
-BEFORE running deploy_agent.bat:
+**Agent side** — `deploy_agent.bat` handles it. It sources the
+sequence (a shared fleet-wide secret) in this order:
 
-```
-set CPSO_KNOCK=tcp:7001,8002,9003
-```
+1. second argument, **quoted** (it contains commas):
+   `deploy_agent.bat "Clinic-Newmarket" "tcp:7001,8002,9003"`
+2. the `CPSO_KNOCK` env var, if `set` in the deploy window
+3. the value already stored on the machine (kept as-is on a
+   re-deploy / update — no re-prompt)
+4. otherwise it **prompts interactively** (Enter = no knocking)
 
-deploy_agent.bat then persists it machine-wide and the agent
-knocks automatically on any failed DB connection. (Already
-deployed a machine? `setx CPSO_KNOCK "tcp:7001,8002,9003" /M`
-then restart the task.) For a manual run: `--knock
-"tcp:7001,8002,9003"`. Default protocol is tcp; prefix `udp:` for
-UDP knocks. Leaving CPSO_KNOCK unset disables knocking entirely.
+Whatever the source, it is persisted machine-wide and the agent
+knocks automatically on any failed DB connection. Default
+protocol is tcp; prefix `udp:` for UDP knocks. For a manual (non
+-agent) run: `python main.py --knock "tcp:7001,8002,9003"`.
+Leaving it unset disables knocking entirely.
 
 ## 2. Pilot (one machine, ~15 minutes)
 
