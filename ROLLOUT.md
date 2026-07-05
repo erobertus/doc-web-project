@@ -348,7 +348,16 @@ INSERT INTO MD_scrape_command (host_pattern, command)
 VALUES ('Clinic-%', 'destruct');
 -- Agents act within one poll interval; each command runs once
 -- per machine. 'update' = git pull + restart (only if the code
--- changed); 'destruct' runs deploy_agent.bat remove.
+-- changed); 'destruct' runs deploy_agent.bat remove. A destruct
+-- older than 180 min (DESTRUCT_TTL_MIN) is ignored, so a freshly
+-- deployed machine never obeys a stale destruct; re-issue it if
+-- some machines were offline longer than that.
+--
+-- NOTE: an agent only obeys commands if its running code already
+-- has command support (the 'Central fleet control' version or
+-- newer). Machines on an older build must be updated once
+-- manually (re-run the bootstrap one-liner) to GET that code;
+-- after that they self-update from commands.
 
 -- periodic hands-off updates: pull every N hours (0 = off; on-
 -- demand commands still work). Use with care - a bad commit

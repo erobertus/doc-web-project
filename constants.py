@@ -39,6 +39,10 @@ AGENT_DESTRUCT_EXIT = 44
 # name of the local file tracking the last command already acted
 # on (kept next to main.py); prevents re-running on restart
 CMD_POS_FILE = 'agent_cmd.pos'
+# a 'destruct' command older than this is ignored, so a freshly
+# deployed machine never obeys a stale destruct left in the table
+# (updates have no such guard - re-pulling latest is harmless)
+DESTRUCT_TTL_MIN = 180
 # periodic self-update: git pull every this many hours (control
 # column auto_update_hrs overrides; 0 = only on-demand commands)
 DEFAULT_AUTO_UPDATE_HRS = 0

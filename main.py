@@ -1451,44 +1451,41 @@ def _write_cmd_pos(uno) -> bool:
         return False
 
 
-_commands_available = True
-
-
 def process_commands(conn: 'connection', host: str):
     """Check MD_scrape_command for rows targeting this host
     (host_pattern is a SQL LIKE) that have not been acted on yet.
-    Returns 'destruct', 'update', or None. The position is
-    persisted BEFORE acting so a command never re-runs after a
-    restart (which would loop). On first run it fast-forwards past
-    any pre-existing commands so a freshly deployed agent only
-    obeys commands issued after it came online. Disables itself
-    (returns None) when the command table does not exist, so the
-    feature is optional."""
-    global _commands_available
-    if not _commands_available:
-        return None
+    Returns 'destruct', 'update', or None.
 
+    The last acted-on id is kept in a local pos file, persisted
+    BEFORE acting so a command never re-runs after a restart.
+    With no pos file yet (first ever run, or the command table was
+    created after this agent started) it starts from 0 and
+    processes everything pending - which is why 'destruct' is
+    guarded by age (DESTRUCT_TTL_MIN): a freshly deployed machine
+    obeys a recent destruct but ignores a stale one. 'update' is
+    always safe to replay (git pull just reports up to date).
+
+    Returns None (without latching) when the table is absent, so
+    creating it later is picked up on the next poll with no
+    restart."""
     curs = conn.cursor()
     try:
         last = _read_cmd_pos()
         if last is None:
-            curs.execute(f'SELECT COALESCE(MAX(cmd_uno), 0) '
-                         f'FROM {CMD_TBL}')
-            (mx,) = curs.fetchone()
-            _write_cmd_pos(mx)
-            return None
-
+            last = 0
         curs.execute(
-            f'SELECT cmd_uno, command FROM {CMD_TBL} '
+            f'SELECT cmd_uno, command, '
+            f'(created >= NOW() - INTERVAL ? MINUTE) '
+            f'FROM {CMD_TBL} '
             f'WHERE cmd_uno > ? AND ? LIKE host_pattern '
-            f'ORDER BY cmd_uno', (last, host))
+            f'ORDER BY cmd_uno',
+            (DESTRUCT_TTL_MIN, last, host))
         rows = curs.fetchall()
     except mariadb.Error as e:
         # 1146 = table missing: the command feature is not set up
-        # on this database; disable it rather than treating it as
-        # a connection failure (which would loop the reconnect)
+        # here yet; skip this poll (no latch - a table created
+        # later is seen next time)
         if getattr(e, 'errno', None) == 1146:
-            _commands_available = False
             return None
         raise
     finally:
@@ -1498,16 +1495,18 @@ def process_commands(conn: 'connection', host: str):
             pass
 
     action = None
-    for (uno, command) in rows:
+    for (uno, command, fresh) in rows:
         if not _write_cmd_pos(uno):
-            # cannot record progress - skip rather than risk a
-            # re-run loop; try again next poll
+            # cannot record progress - stop rather than risk a
+            # re-run loop; retry next poll
             break
         cmd = (command or '').strip().lower()
         if cmd == 'destruct':
-            return 'destruct'      # destruct wins, act at once
-        if cmd == 'update':
-            action = 'update'      # newest update; keep scanning
+            if fresh:
+                return 'destruct'  # recent destruct wins, act now
+            # stale destruct: pos already advanced, ignore it
+        elif cmd == 'update':
+            action = 'update'      # collapse repeats to one pull
     return action
 
 
