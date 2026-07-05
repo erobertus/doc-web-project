@@ -296,18 +296,16 @@ UPDATE MD_scrape_control SET skip_gaps = 1;
 -- range assignments) - e.g. for the periodic full refresh:
 UPDATE MD_scrape_control SET skip_gaps = 0;
 
--- FORCE a re-scrape of a range (testing, quick->deep). Do NOT
--- set interval_days = 0: with no freshness window the pool never
--- advances and, run by multiple agents, every worker grabs the
--- same numbers. Instead RESET the target numbers so a normal
--- sweep re-does them exactly once and advances properly:
-UPDATE MD_batch_details
-SET updated_date_time = NOW() - INTERVAL 100 DAY
-WHERE cpso_no BETWEEN 90000 AND 120000 AND isCompleted;
--- then run a normal sweep over that range (interval_days >= 1):
+-- FORCE a re-scrape now, ignoring how recently numbers were done
+-- (testing, quick->deep). interval_days = 0 re-scrapes everything
+-- in range, once per number this pass (it excludes only numbers
+-- completed AFTER this sweep started, so the pool still advances
+-- and, with the allocation lock, workers do not collide):
 UPDATE MD_scrape_control
 SET cpso_start = 90000, cpso_stop = 120000,
-    interval_days = 20, go_flag = 1;
+    interval_days = 0, go_flag = 1;
+-- restore the normal refresh cadence afterwards:
+UPDATE MD_scrape_control SET interval_days = 20;
 
 -- who is working right now (last 24 h, per machine)
 SELECT host, COUNT(*) batches, MAX(start_date) last_start,

@@ -485,7 +485,8 @@ def request_workload(conn: 'connection',
                      min_val=10000,
                      max_val=150000,
                      desc=False,
-                     skip_gaps=False) -> tuple:
+                     skip_gaps=False,
+                     sweep_start=None) -> tuple:
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
@@ -524,14 +525,15 @@ def request_workload(conn: 'connection',
     try:
         return _allocate_batch(conn, curs, batch_size, random,
                                interval, min_val, max_val, desc,
-                               skip_gaps)
+                               skip_gaps, sweep_start)
     finally:
         curs.execute("SELECT RELEASE_LOCK('cpso_batch_alloc')")
         conn.autocommit = save_commit_state
 
 
 def _allocate_batch(conn, curs, batch_size, random, interval,
-                    min_val, max_val, desc, skip_gaps) -> tuple:
+                    min_val, max_val, desc, skip_gaps,
+                    sweep_start=None) -> tuple:
     # runs while the caller holds the allocation lock, with
     # conn.autocommit already False (restored by the caller)
 
@@ -581,15 +583,26 @@ def _allocate_batch(conn, curs, batch_size, random, interval,
     else:
         order_clause = 'ORDER BY cpso_no'
 
-    # A number is skipped when it was COMPLETED within the
-    # freshness window (don't re-scrape recent work); known gaps
-    # ARE re-checked by default so newly-assigned mid-range
-    # numbers get picked up, and skip_gaps additionally excludes
+    # A number is skipped when it was COMPLETED "recently":
+    #  - interval >= 1: within the freshness window (the normal
+    #    refresh cadence - don't redo work from the last N days);
+    #  - interval < 1: only if completed AT/AFTER this sweep began
+    #    (sweep_start) - i.e. ignore prior-run recency and
+    #    re-scrape everything, but still do each number once this
+    #    pass so the pool advances.
+    # Known gaps are re-checked by default (newly-assigned mid-
+    # range numbers get picked up); skip_gaps also excludes
     # PermExcluded gaps for a fast re-sweep.
-    done_cond = 'isCompleted AND updated_date_time > ' \
-                f'(NOW() - INTERVAL {interval} DAY)'
+    if interval >= 1:
+        done_recent = 'updated_date_time > ' \
+                      f'(NOW() - INTERVAL {interval} DAY)'
+    elif sweep_start is not None:
+        done_recent = f"updated_date_time >= '{sweep_start}'"
+    else:
+        done_recent = '0'          # no marker: exclude none
+    done_cond = f'(isCompleted AND ({done_recent}))'
     if skip_gaps:
-        done_cond = f'(({done_cond}) OR PermExcluded)'
+        done_cond = f'({done_cond} OR PermExcluded)'
 
     # Also skip numbers that are CLAIMED but not yet completed by
     # a still-open batch (another live worker holds them). This is
@@ -1201,15 +1214,17 @@ def run_sweep(conn: 'connection', http_session,
           f"(not-found numbers below it are flagged as gaps; "
           f"{'skipped' if skip_gaps else 're-checked'} this run)")
 
+    # sweep epoch (database clock, so it is comparable to the
+    # stored timestamps regardless of each machine's timezone).
+    # With interval < 1 the pool excludes only numbers completed
+    # at/after this instant, so the sweep re-scrapes everything
+    # done before it started, exactly once.
+    curs.execute('SELECT NOW()')
+    sweep_start = curs.fetchone()[0]
     if interval < 1:
-        msg = (f'interval={interval} means no number is ever '
-               f'considered "recently done", so the pool never '
-               f'advances (it re-offers the same numbers). To '
-               f'force a re-scrape, reset the target numbers '
-               f'instead (backdate MD_batch_details.'
-               f'updated_date_time) and run with interval>=1.')
-        print(f'WARNING: {msg}')
-        DB_LOG.log('WARN', msg)
+        print(f'interval={interval}: re-scraping everything in '
+              f'range, ignoring prior-run recency (each number '
+              f'once this pass).')
 
     DB_LOG.log('INFO',
                f'Sweep start: range {cpso_start}-{cpso_stop}, '
@@ -1229,7 +1244,8 @@ def run_sweep(conn: 'connection', http_session,
                                 max_val=cpso_stop,
                                 desc=descending,
                                 interval=interval,
-                                skip_gaps=skip_gaps)
+                                skip_gaps=skip_gaps,
+                                sweep_start=sweep_start)
 
     while len(workload[1]) > 0:
 
@@ -1339,7 +1355,8 @@ def run_sweep(conn: 'connection', http_session,
                                     max_val=cpso_stop,
                                     desc=descending,
                                     interval=interval,
-                                    skip_gaps=skip_gaps)
+                                    skip_gaps=skip_gaps,
+                                    sweep_start=sweep_start)
 
     DB_LOG.log('INFO', f'Sweep finished: {processed} processed')
     return processed
