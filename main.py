@@ -505,6 +505,36 @@ def request_workload(conn: 'connection',
     reap_stale_batches(conn, stale_minutes=STALE_MINUTES_ACTIVE)
     conn.autocommit = False
 
+    # Serialize batch allocation across ALL fleet workers. The
+    # pool SELECT (which numbers are free) and the claim INSERT
+    # must be atomic as a pair: a plain transaction is not enough
+    # because two workers can each run the SELECT before either
+    # has INSERTed its claim, so both grab the same numbers. A
+    # named lock makes the whole allocation mutually exclusive;
+    # it is sub-second, so serializing it is cheap even with 20
+    # workers, and it auto-releases if a worker's connection dies.
+    curs.execute("SELECT GET_LOCK('cpso_batch_alloc', 60)")
+    got = curs.fetchone()
+    if not got or got[0] != 1:
+        print('Could not acquire the allocation lock; '
+              'retrying on the next request.')
+        conn.autocommit = save_commit_state
+        return (0, tuple())
+
+    try:
+        return _allocate_batch(conn, curs, batch_size, random,
+                               interval, min_val, max_val, desc,
+                               skip_gaps)
+    finally:
+        curs.execute("SELECT RELEASE_LOCK('cpso_batch_alloc')")
+        conn.autocommit = save_commit_state
+
+
+def _allocate_batch(conn, curs, batch_size, random, interval,
+                    min_val, max_val, desc, skip_gaps) -> tuple:
+    # runs while the caller holds the allocation lock, with
+    # conn.autocommit already False (restored by the caller)
+
     # curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     curs.execute(BEGIN_TRAN)
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
@@ -551,21 +581,33 @@ def request_workload(conn: 'connection',
     else:
         order_clause = 'ORDER BY cpso_no'
 
-    # by default a number is skipped only when it was scraped
-    # within the freshness window - known gaps ARE re-checked, so
-    # mid-range numbers newly assigned to a doctor get picked up.
-    # skip_gaps additionally excludes PermExcluded numbers (known
-    # empty spaces) for a fast close-in-time re-sweep.
-    fresh_cond = 'updated_date_time > (NOW() - INTERVAL ' \
-                 f'{interval} DAY)'
+    # A number is skipped when it was COMPLETED within the
+    # freshness window (don't re-scrape recent work); known gaps
+    # ARE re-checked by default so newly-assigned mid-range
+    # numbers get picked up, and skip_gaps additionally excludes
+    # PermExcluded gaps for a fast re-sweep.
+    done_cond = 'isCompleted AND updated_date_time > ' \
+                f'(NOW() - INTERVAL {interval} DAY)'
     if skip_gaps:
-        fresh_cond = f'({fresh_cond} OR PermExcluded)'
+        done_cond = f'(({done_cond}) OR PermExcluded)'
 
+    # Also skip numbers that are CLAIMED but not yet completed by
+    # a still-open batch (another live worker holds them). This is
+    # interval-independent - it is what actually prevents two
+    # workers from scraping the same number, so it holds even with
+    # a zero/short freshness window. Reaped (abandoned) batches
+    # have end_date set, so their numbers are free again.
     stmt = f'SELECT cpso_no FROM _TMP_{batch_id} ' \
-           f'WHERE cpso_no not in (' \
-           f'SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
-           f'WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
-           f'AND {fresh_cond} ) ' \
+           f'WHERE cpso_no NOT IN (' \
+           f'  SELECT d.{C_CPSO_NO} FROM {BATCH_DET_TBL} d ' \
+           f'  JOIN {BATCH_HEAD_TBL} h ' \
+           f'  ON d.batch_uno = h.batch_uno ' \
+           f'  WHERE d.{C_CPSO_NO} between {min_val} and {max_val} '\
+           f'  AND NOT d.isCompleted AND h.end_date IS NULL) ' \
+           f'AND cpso_no NOT IN (' \
+           f'  SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
+           f'  WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
+           f'  AND {done_cond}) ' \
            f'{order_clause} ' \
            f'LIMIT {batch_size}'
 
@@ -586,12 +628,8 @@ def request_workload(conn: 'connection',
     if len(src_list) > 0:
         curs.execute(stmt)
     curs.execute(COMMIT_TRAN)
-    # curs.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
 
-    # conn.commit()
-    conn.autocommit = save_commit_state
-
-    # Drop temp table
+    # Drop temp table (autocommit is restored by the caller)
     stmt = f'DROP TEMPORARY TABLE _TMP_{batch_id}'
     curs.execute(stmt)
 
@@ -635,10 +673,20 @@ def update_detail_table(conn: 'connection',
         # a found doctor (or a not-found number above the known
         # max) is NOT a gap - clear any stale gap flag left on
         # older batch rows, so a --skip-gaps sweep includes it
-        # again once a former gap has been assigned to a doctor
-        curs.execute(f'UPDATE {BATCH_DET_TBL} SET PermExcluded = 0 '
-                     f'WHERE {C_CPSO_NO} = ? AND PermExcluded',
-                     (cpso_no,))
+        # again once a former gap has been assigned to a doctor.
+        # Retry once on a transient deadlock (this touches every
+        # row for the number, so it can briefly contend).
+        for attempt in (1, 2):
+            try:
+                curs.execute(
+                    f'UPDATE {BATCH_DET_TBL} SET PermExcluded = 0 '
+                    f'WHERE {C_CPSO_NO} = ? AND PermExcluded',
+                    (cpso_no,))
+                break
+            except mariadb.OperationalError:
+                if attempt == 2:
+                    raise
+                time.sleep(0.5)
 
     conn.autocommit = save_commit_state
     conn.commit()
@@ -1152,6 +1200,16 @@ def run_sweep(conn: 'connection', http_session,
     print(f"Highest CPSO number in database: {known_max_cpso} "
           f"(not-found numbers below it are flagged as gaps; "
           f"{'skipped' if skip_gaps else 're-checked'} this run)")
+
+    if interval < 1:
+        msg = (f'interval={interval} means no number is ever '
+               f'considered "recently done", so the pool never '
+               f'advances (it re-offers the same numbers). To '
+               f'force a re-scrape, reset the target numbers '
+               f'instead (backdate MD_batch_details.'
+               f'updated_date_time) and run with interval>=1.')
+        print(f'WARNING: {msg}')
+        DB_LOG.log('WARN', msg)
 
     DB_LOG.log('INFO',
                f'Sweep start: range {cpso_start}-{cpso_stop}, '

@@ -291,12 +291,23 @@ UPDATE MD_scrape_control SET use_random = 0,
   cpso_start = 154000, cpso_stop = 200000;
 
 -- fast close-in-time re-sweep: skip known gaps (empty spaces).
--- Good for testing / quick->deep re-runs; pair with a low
--- interval_days to actually re-scrape recently-done numbers.
 UPDATE MD_scrape_control SET skip_gaps = 1;
 -- back to the thorough default (re-check gaps, catch new mid-
 -- range assignments) - e.g. for the periodic full refresh:
 UPDATE MD_scrape_control SET skip_gaps = 0;
+
+-- FORCE a re-scrape of a range (testing, quick->deep). Do NOT
+-- set interval_days = 0: with no freshness window the pool never
+-- advances and, run by multiple agents, every worker grabs the
+-- same numbers. Instead RESET the target numbers so a normal
+-- sweep re-does them exactly once and advances properly:
+UPDATE MD_batch_details
+SET updated_date_time = NOW() - INTERVAL 100 DAY
+WHERE cpso_no BETWEEN 90000 AND 120000 AND isCompleted;
+-- then run a normal sweep over that range (interval_days >= 1):
+UPDATE MD_scrape_control
+SET cpso_start = 90000, cpso_stop = 120000,
+    interval_days = 20, go_flag = 1;
 
 -- who is working right now (last 24 h, per machine)
 SELECT host, COUNT(*) batches, MAX(start_date) last_start,
