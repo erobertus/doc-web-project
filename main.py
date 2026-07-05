@@ -19,12 +19,20 @@ from cpso_site import (make_session, fetch_physician_page,
 from knock import knock, knock_config_from_env
 
 
-def db_connect(**conn_params):
+def db_connect(_knock_retries=6, _knock_gap=2.0, **conn_params):
     """mariadb.connect with a port-knock fallback for clinics
-    behind a dynamic-IP firewall. If the first attempt fails and a
-    knock sequence is configured (CPSO_KNOCK), knock the firewall
-    to authorize this machine's current IP, then retry once. When
-    no sequence is configured this is a plain mariadb.connect."""
+    behind a dynamic-IP firewall.
+
+    If the first attempt fails and a knock sequence is configured
+    (CPSO_KNOCK), knock the firewall to authorize this machine's
+    current IP, then retry the connection several times spread
+    across the firewall's open window (knockd opens the port for
+    tens of seconds, and needs a moment to install the rule after
+    seeing the sequence, so a single immediate retry can miss).
+    Raises the last error if still unreachable - callers (the
+    agent reconnect loop, the run_agent.bat restart loop) knock
+    again on their own schedule. No sequence configured = a plain
+    mariadb.connect."""
     try:
         return mariadb.connect(**conn_params)
     except mariadb.Error:
@@ -35,7 +43,18 @@ def db_connect(**conn_params):
         print(f'DB unreachable - port-knocking {host} '
               f'({proto} {ports}) to authorize this IP...')
         knock(host, ports, proto, delay)
-        return mariadb.connect(**conn_params)
+        last = None
+        for attempt in range(_knock_retries):
+            try:
+                conn = mariadb.connect(**conn_params)
+                if attempt > 0:
+                    print(f'DB reachable after knock '
+                          f'(attempt {attempt + 1}).')
+                return conn
+            except mariadb.Error as e:
+                last = e
+                time.sleep(_knock_gap)
+        raise last
 
 
 class DbLogger:
