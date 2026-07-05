@@ -11,7 +11,8 @@
 # per machine at deploy time) or the --knock command-line option.
 #
 #   CPSO_KNOCK        "tcp:7001,8002,9003"  (proto optional,
-#                     default tcp; ports in order)
+#                     default tcp; ports in order; ',' or ';'
+#                     separators both accepted)
 #   CPSO_KNOCK_DELAY  seconds between knocks (default 0.3)
 
 import os

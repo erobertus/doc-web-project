@@ -1546,8 +1546,9 @@ if __name__ == '__main__':
                              'connection fails (clinics behind a '
                              'dynamic-IP firewall). Format '
                              '"[proto:]p1,p2,p3" e.g. '
-                             '"tcp:7001,8002,9003". Overrides the '
-                             'CPSO_KNOCK environment variable')
+                             '"tcp:7001,8002,9003" (ports may be '
+                             "separated by ',' or ';'). Overrides "
+                             'the CPSO_KNOCK environment variable')
     parser.add_argument('--knock-delay', type=float, default=None,
                         metavar='SEC',
                         help='seconds between individual knocks '

@@ -196,10 +196,12 @@ sequence (a shared fleet-wide secret) in this order:
 4. otherwise it **prompts interactively** (Enter = no knocking)
 
 Whatever the source, it is persisted machine-wide and the agent
-knocks automatically on any failed DB connection. Default
-protocol is tcp; prefix `udp:` for UDP knocks. For a manual (non
--agent) run: `python main.py --knock "tcp:7001,8002,9003"`.
-Leaving it unset disables knocking entirely.
+knocks automatically on any failed DB connection. Ports may be
+separated by `,` or `;` (`tcp:7001;8002;9003` is equivalent).
+Default protocol is tcp; prefix `udp:` for UDP knocks. For a
+manual (non-agent) run: `python main.py --knock
+"tcp:7001,8002,9003"`. Leaving it unset disables knocking
+entirely.
 
 ## 2. Pilot (one machine, ~15 minutes)
 

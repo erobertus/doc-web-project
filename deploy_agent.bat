@@ -115,7 +115,8 @@ rem  Opens the DB firewall for this clinic's dynamic IP; a
 rem  fleet-wide shared secret. Sourced in order: arg 2 (quoted),
 rem  the CPSO_KNOCK env var, the value already stored on this
 rem  machine (kept as-is on a re-deploy), else an interactive
-rem  prompt. Format "[proto:]p1,p2,p3" e.g. "tcp:7001,8002,9003".
+rem  prompt. Format "[proto:]p1,p2,p3" e.g. "tcp:7001,8002,9003"
+rem  (ports may be separated by ',' or ';').
 set "EXISTING_KNOCK="
 for /f "tokens=2,*" %%a in ('reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v CPSO_KNOCK 2^>nul ^| find /i "CPSO_KNOCK"') do set "EXISTING_KNOCK=%%b"
 
