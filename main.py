@@ -424,7 +424,7 @@ def request_workload(conn: 'connection',
     # curs.execute('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE')
     curs.execute(BEGIN_TRAN)
     stmt = f'INSERT INTO {BATCH_HEAD_TBL} (batch_size, host) ' \
-           f'VALUES ({batch_size}, user())'
+           f'VALUES ({batch_size}, LEFT(user(), 128))'
     curs.execute(stmt)
     batch_id = curs.lastrowid
 

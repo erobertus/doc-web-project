@@ -57,6 +57,10 @@ ALTER TABLE z847e_MD_spec_types       CONVERT TO CHARACTER SET utf8mb4 COLLATE u
 -- ~1M rows, several minutes, locks the table:
 ALTER TABLE MD_addresses              CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 
+-- fleet machines' identities (user()@reverse-dns) can exceed the
+-- legacy 50-char host column
+ALTER TABLE MD_batch_header MODIFY host VARCHAR(128) DEFAULT NULL;
+
 -- clear any leftover abort flag / stale open batches
 DELETE FROM MD_batch_header
 WHERE host = '!!!ABORT_ALL' AND batch_size < 0;
