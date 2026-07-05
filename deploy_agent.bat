@@ -50,9 +50,10 @@ if errorlevel 1 (
 )
 python -c "import sys, mariadb; sys.exit(0 if 'Program Files' in mariadb.__file__ else 1)"
 if errorlevel 1 (
-    echo [FAIL] packages resolve to a per-user location (an earlier
-    echo        unelevated pip run). Fix and re-run:
+    echo [FAIL] packages resolve to a per-user location - caused
+    echo        by an earlier pip run without elevation. Fix:
     echo          rmdir /s /q "%%APPDATA%%\Python"
+    echo        then re-run this script.
     exit /b 1
 )
 echo [ ok ] dependencies in global site-packages
