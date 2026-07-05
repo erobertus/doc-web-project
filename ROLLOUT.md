@@ -310,13 +310,18 @@ UPDATE MD_scrape_control SET skip_gaps = 1;
 UPDATE MD_scrape_control SET skip_gaps = 0;
 
 -- FORCE a re-scrape now, ignoring how recently numbers were done
--- (testing, quick->deep). interval_days = 0 re-scrapes everything
--- in range, once per number this pass (it excludes only numbers
--- completed AFTER this sweep started, so the pool still advances
--- and, with the allocation lock, workers do not collide):
+-- (testing, quick->deep). interval_days = 0 re-scrapes the range
+-- once per number. The campaign epoch is the control row's
+-- `updated` timestamp (set by this UPDATE), SHARED by the whole
+-- fleet and STABLE across restarts, so: no two agents redo the
+-- same number, and stopping then re-running RESUMES (already-done
+-- numbers stay skipped) rather than restarting from the bottom.
 UPDATE MD_scrape_control
 SET cpso_start = 90000, cpso_stop = 120000,
     interval_days = 0, go_flag = 1;
+-- to RESTART the interval=0 pass from scratch (redo everything),
+-- just touch the row again so `updated` moves forward:
+UPDATE MD_scrape_control SET interval_days = 0;
 -- restore the normal refresh cadence afterwards:
 UPDATE MD_scrape_control SET interval_days = 20;
 

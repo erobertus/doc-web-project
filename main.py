@@ -1222,7 +1222,8 @@ def run_sweep(conn: 'connection', http_session,
               control_check=None,
               check_every=0,
               interval=DEFAULT_INTERVAL_DAYS,
-              skip_gaps=False) -> int:
+              skip_gaps=False,
+              sweep_start=None) -> int:
     """Work the CPSO number pool until it is exhausted. When
     control_check is given it is consulted between batches; a
     falsy result stops the sweep after the current batch. With
@@ -1245,16 +1246,24 @@ def run_sweep(conn: 'connection', http_session,
           f"{'skipped' if skip_gaps else 're-checked'} this run)")
 
     # sweep epoch (database clock, so it is comparable to the
-    # stored timestamps regardless of each machine's timezone).
-    # With interval < 1 the pool excludes only numbers completed
-    # at/after this instant, so the sweep re-scrapes everything
-    # done before it started, exactly once.
-    curs.execute('SELECT NOW()')
-    sweep_start = curs.fetchone()[0]
+    # stored timestamps). With interval < 1 the pool excludes
+    # only numbers completed at/after this epoch, so the sweep
+    # re-scrapes everything done before it, exactly once.
+    # In agent mode the caller passes the control row's `updated`
+    # timestamp as the epoch: it is SHARED across the whole fleet
+    # and STABLE across restarts, so (a) two workers never redo a
+    # number a sibling already completed this campaign, and (b) a
+    # stopped run resumes instead of restarting from the bottom.
+    # A fresh epoch (re-scrape from scratch) = touch the control
+    # row. Manual runs fall back to NOW() (single process).
+    if sweep_start is None:
+        curs.execute('SELECT NOW()')
+        sweep_start = curs.fetchone()[0]
     if interval < 1:
-        print(f'interval={interval}: re-scraping everything in '
-              f'range, ignoring prior-run recency (each number '
-              f'once this pass).')
+        print(f'interval={interval}: re-scraping range (epoch '
+              f'{sweep_start}); numbers completed since then are '
+              f'skipped so the pool advances and workers do not '
+              f'collide.')
 
     DB_LOG.log('INFO',
                f'Sweep start: range {cpso_start}-{cpso_stop}, '
@@ -1786,7 +1795,8 @@ def run_agent(args, conn: 'connection'):
                             ctl['interval']
                             if ctl['interval'] is not None
                             else args.interval),
-                        skip_gaps=ctl['skip_gaps'])
+                        skip_gaps=ctl['skip_gaps'],
+                        sweep_start=ctl['updated'])
 
                     after = read_control(conn)
                     if after is not None and after['go'] \
