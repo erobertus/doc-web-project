@@ -127,6 +127,15 @@ admin logs out (or never logs in again).
    `C:\Program Files\` — that is the proof the SYSTEM task will
    find everything. If `mariadb` fails to install, install the
    "Microsoft Visual C++ Redistributable (x64)" and retry.
+
+   If pip was accidentally run WITHOUT elevation first, a later
+   elevated run reports "Requirement already satisfied" from
+   `AppData\Roaming\Python` and installs nothing. Remedy:
+   ```
+   rmdir /s /q "C:\Users\<admin>\AppData\Roaming\Python"
+   pip install -r requirements.txt
+   ```
+   then re-run the verification one-liner.
 4. **Permissions** (recommended): the Windows default ACL under
    `C:\` usually lets Authenticated Users MODIFY subfolders —
    i.e. the non-admin clinic account could edit scripts that run
