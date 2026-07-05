@@ -96,18 +96,16 @@ Do the whole installation from the **admin account** — the
 scheduled task runs as SYSTEM, so it keeps working after the
 admin logs out (or never logs in again).
 
-1. **Python 3.13** — use the CLASSIC installer
-   (`python-3.13.x-amd64.exe` from python.org), as admin:
+1. **Python 3.10+ (3.13/3.14 both fine)** — use the CLASSIC
+   full installer (`python-3.1x.x-amd64.exe` from python.org):
    Customize installation → tick **"Install for all users"** and
    **"Add python.exe to PATH"** → installs to
-   `C:\Program Files\Python313`. Verify in a new cmd window:
-   `python --version`.
-   AVOID Python 3.14's new "install manager" — it defaults to a
-   per-user install under `C:\Users\<name>\AppData\...`, whose
+   `C:\Program Files\Python31x`. Verify:
+   `where python` must show a `C:\Program Files\...` path.
+   AVOID the "Python install manager" variant — it installs
+   per-user under `C:\Users\<name>\AppData\Local\Python`, whose
    PATH entry the SYSTEM task does not see (agent dies with
-   `'python' is not recognized`). If pip output mentions
-   `AppData\Local\Python`, you got the wrong installer —
-   uninstall and use the classic one.
+   `'python' is not recognized`).
 2. **Get the code** (note the branch — the repo default is stale):
    ```
    cd C:\
@@ -116,13 +114,18 @@ admin logs out (or never logs in again).
    Keep it at a machine-wide path like `C:\cpso` — not under a
    user profile. No git on the machine? Copy the project folder
    from a USB stick / network share instead.
-3. **Dependencies** (from an **elevated** prompt, so they land in
-   the global site-packages that SYSTEM sees):
+3. **Dependencies** — from an **elevated** prompt (right-click
+   cmd → "Run as administrator"; an admin account with a normal
+   prompt is NOT enough):
    ```
    cd C:\cpso
    pip install -r requirements.txt
+   python -c "import sys, mariadb; print(sys.executable); print(mariadb.__file__)"
    ```
-   If `mariadb` fails to install, install the
+   The install output must NOT say "Defaulting to user
+   installation" and the two printed paths must start with
+   `C:\Program Files\` — that is the proof the SYSTEM task will
+   find everything. If `mariadb` fails to install, install the
    "Microsoft Visual C++ Redistributable (x64)" and retry.
 4. **Permissions** (recommended): the Windows default ACL under
    `C:\` usually lets Authenticated Users MODIFY subfolders —
