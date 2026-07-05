@@ -101,13 +101,25 @@ window (right-click cmd → "Run as administrator" — an admin
 account with a normal prompt is NOT enough). The scheduled task
 runs as SYSTEM, so it keeps working after the admin logs out.
 
-1. **Python 3.10+ (3.13/3.14 both fine)** — use the CLASSIC
-   full installer (`python-3.1x.x-amd64.exe` from python.org):
-   Customize installation → tick **"Install for all users"** and
-   **"Add python.exe to PATH"** → installs to
-   `C:\Program Files\Python31x`.
-   AVOID the "Python install manager" variant — it installs
-   per-user under `AppData`, invisible to the SYSTEM task.
+1. **Python 3.10+ (3.13/3.14 both fine)** — two supported ways;
+   the deploy script auto-detects either:
+   - **Classic full installer** (`python-3.1x.x-amd64.exe`):
+     Customize installation → tick **"Install for all users"**
+     and **"Add python.exe to PATH"** → installs to
+     `C:\Program Files\Python31x`. NOT the "Python install
+     manager" default flow — its managed installs are per-user
+     under `AppData`, invisible to the SYSTEM task.
+   - **Install-manager `--target` mode** (the path forward once
+     the classic installer is retired in 3.15+): after cloning
+     in step 2, bundle a runtime INSIDE the repo:
+     ```
+     py install 3.14 --target C:\cpso\python
+     ```
+     Both scripts prefer `C:\cpso\python\python.exe` when it
+     exists — no PATH or Program Files involvement at all.
+     (Check `py help install` for the exact option name on
+     your manager version.)
+
    (git too, if not present: git-scm.com, defaults are fine.)
 2. **Clone + deploy** (note the branch — the repo default is
    stale):

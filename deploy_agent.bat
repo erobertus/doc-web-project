@@ -2,8 +2,10 @@
 rem ============================================================
 rem  CPSO scrape agent - one-shot deployment
 rem  Usage (ELEVATED cmd):  deploy_agent.bat "Clinic-Name"
-rem  Prerequisites: classic Python (all users) + git, repo cloned
-rem  to a machine-wide path (this script lives inside the repo).
+rem  Prerequisites: git + Python, where Python is EITHER the
+rem  classic all-users install (Program Files) OR a runtime
+rem  bundled into the repo:  py install 3.14 --target C:\cpso\python
+rem  This script lives inside the repo.
 rem ============================================================
 setlocal
 cd /d %~dp0
@@ -20,35 +22,43 @@ if errorlevel 1 (
 )
 echo [ ok ] elevated prompt
 
-rem --- 1. python must be the all-users install ----------------
+rem --- 1. locate python: bundled runtime wins over PATH -------
 set "PYEXE="
+if exist "%~dp0python\python.exe" set "PYEXE=%~dp0python\python.exe"
+if defined PYEXE goto :python_ok
+
 for /f "delims=" %%p in ('where python 2^>nul') do (
     if not defined PYEXE set "PYEXE=%%p"
 )
 if not defined PYEXE (
-    echo [FAIL] python not found on PATH. Install Python with the
+    echo [FAIL] python not found. Either install Python with the
     echo        CLASSIC installer, "Install for all users" +
-    echo        "Add python.exe to PATH", then re-run.
+    echo        "Add python.exe to PATH", or bundle a runtime:
+    echo          py install 3.14 --target "%~dp0python"
+    echo        then re-run this script.
     exit /b 1
 )
 echo %PYEXE% | findstr /i /c:"Program Files" >nul
 if errorlevel 1 (
     echo [FAIL] python resolves to "%PYEXE%" - a per-user install
-    echo        the SYSTEM task cannot see. Uninstall it and use
-    echo        the classic installer with "Install for all users".
+    echo        the SYSTEM task cannot see. Either reinstall with
+    echo        the classic installer + "Install for all users",
+    echo        or bundle a runtime into the repo:
+    echo          py install 3.14 --target "%~dp0python"
     exit /b 1
 )
+:python_ok
 echo [ ok ] python: %PYEXE%
 
-rem --- 2. dependencies into the global site-packages ----------
-python -m pip install -q -r requirements.txt
+rem --- 2. dependencies into a SYSTEM-visible site-packages ----
+"%PYEXE%" -m pip install -q -r requirements.txt
 if errorlevel 1 (
     echo [FAIL] pip install failed. If the error mentions mariadb,
     echo        install "Microsoft Visual C++ Redistributable x64"
     echo        and re-run.
     exit /b 1
 )
-python -c "import sys, mariadb; sys.exit(0 if 'Program Files' in mariadb.__file__ else 1)"
+"%PYEXE%" -c "import sys, mariadb; sys.exit(1 if 'roaming' in mariadb.__file__.lower() else 0)"
 if errorlevel 1 (
     echo [FAIL] packages resolve to a per-user location - caused
     echo        by an earlier pip run without elevation. Fix:
@@ -56,12 +66,12 @@ if errorlevel 1 (
     echo        then re-run this script.
     exit /b 1
 )
-echo [ ok ] dependencies in global site-packages
+echo [ ok ] dependencies in a SYSTEM-visible location
 
 rem --- 3. ACL hardening: clinic users read-only ---------------
 icacls "%~dp0." /inheritance:d >nul
 icacls "%~dp0." /remove:g "Authenticated Users" /t >nul 2>&1
-echo [ ok ] permissions tightened (users read-only)
+echo [ ok ] permissions tightened - users read-only
 
 rem --- 4. per-clinic agent name -------------------------------
 if "%~1"=="" (
