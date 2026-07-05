@@ -21,8 +21,8 @@ rem ============================================================
 setlocal
 cd /d %~dp0
 
-set "PY_VERSION=3.13.1"
-set "PY_HOME=C:\Program Files\Python313"
+rem used only if discovering the latest release fails
+set "PY_FALLBACK=3.13.1"
 
 echo.
 echo === CPSO agent deployment ===
@@ -55,7 +55,17 @@ if defined PYEXE (
     if not errorlevel 1 goto :python_ok
 )
 
-echo [    ] no SYSTEM-visible python - installing %PY_VERSION% for all users...
+echo [    ] no SYSTEM-visible python - discovering latest release...
+set "PY_VERSION="
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -Command "try{$c=(Invoke-WebRequest -UseBasicParsing 'https://www.python.org/downloads/').Content;if($c -match 'Download Python (3\.[0-9]+\.[0-9]+)'){$Matches[1]}}catch{}"`) do set "PY_VERSION=%%v"
+if not defined PY_VERSION (
+    echo [warn] could not discover the latest release - using
+    echo        fallback %PY_FALLBACK%
+    set "PY_VERSION=%PY_FALLBACK%"
+)
+for /f "tokens=1,2 delims=." %%a in ("%PY_VERSION%") do set "PY_DIRVER=%%a%%b"
+set "PY_HOME=C:\Program Files\Python%PY_DIRVER%"
+echo [    ] installing python %PY_VERSION% for all users...
 curl -L -s -o "%TEMP%\cpso_pysetup.exe" "https://www.python.org/ftp/python/%PY_VERSION%/python-%PY_VERSION%-amd64.exe"
 if errorlevel 1 (
     echo [FAIL] download from python.org failed - check internet

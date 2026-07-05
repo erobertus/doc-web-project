@@ -11,7 +11,8 @@ setlocal
 set "REPO_URL=https://github.com/erobertus/doc-web-project.git"
 set "REPO_BRANCH=geocode_on_the_fly"
 set "REPO_DIR=C:\cpso"
-set "GIT_VERSION=2.47.1"
+rem used only if discovering the latest release fails
+set "GIT_FALLBACK=2.47.1"
 
 echo.
 echo === CPSO agent bootstrap ===
@@ -35,8 +36,16 @@ if exist "%ProgramFiles%\Git\cmd\git.exe" (
     goto :git_ok
 )
 
-echo [    ] git not found - downloading %GIT_VERSION%...
-curl -L -s -o "%TEMP%\cpso_gitsetup.exe" "https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/Git-%GIT_VERSION%-64-bit.exe"
+echo [    ] git not found - discovering latest release...
+set "GIT_URL="
+for /f "usebackq delims=" %%u in (`powershell -NoProfile -Command "try{(Invoke-RestMethod 'https://api.github.com/repos/git-for-windows/git/releases/latest').assets | Where-Object { $_.name -like 'Git-*-64-bit.exe' } | Select-Object -First 1 -ExpandProperty browser_download_url}catch{}"`) do set "GIT_URL=%%u"
+if not defined GIT_URL (
+    echo [warn] could not discover the latest release - using
+    echo        fallback %GIT_FALLBACK%
+    set "GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_FALLBACK%.windows.1/Git-%GIT_FALLBACK%-64-bit.exe"
+)
+echo [    ] downloading git...
+curl -L -s -o "%TEMP%\cpso_gitsetup.exe" "%GIT_URL%"
 if errorlevel 1 (
     echo [FAIL] download failed - check internet access, or
     echo        install git manually from git-scm.com and re-run.
