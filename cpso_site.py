@@ -74,6 +74,14 @@ RE_PHONE_EXT = re.compile(
     r'(?:\b(?:ext|extension)\.?|\bx\.?)\s*:?\s*(\d+)\s*$', re.I)
 RE_WS = re.compile(r'[\s\xa0]+')
 
+# invisible Unicode format characters that doctors paste
+# into the register along with their data (bidi overrides,
+# zero-width spaces, BOM): never meaningful, always removed
+RE_INVISIBLE = re.compile('[\u200b-\u200f'
+                          '\u202a-\u202e'
+                          '\u2060-\u2064'
+                          '\ufeff]')
+
 
 class CpsoFetchError(Exception):
     """Raised when the register cannot be reached / keeps failing.
@@ -89,6 +97,8 @@ def make_session() -> requests.Session:
 
 
 def _norm(s: str) -> str:
+    s = RE_INVISIBLE.sub('', s)
+    s = s.replace('\u2011', '-')  # non-breaking hyphen
     return RE_WS.sub(' ', s).strip()
 
 
