@@ -248,6 +248,12 @@ WHERE log_time < NOW() - INTERVAL 60 DAY;
 --   on any machine:  python main.py -a
 -- everything already dead, just clean the bookkeeping:
 --   python main.py --force-abort
+
+-- per-machine lifecycle (elevated cmd on that machine):
+--   C:\cpso\deploy_agent.bat disable   stop agent, keep install
+--   C:\cpso\deploy_agent.bat enable    re-enable + start
+--   C:\cpso\deploy_agent.bat remove    task + name + C:\cpso gone
+--                                      - Python and git stay
 ```
 
 Notes:

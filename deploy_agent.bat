@@ -1,8 +1,15 @@
 @echo off
 rem ============================================================
-rem  CPSO scrape agent - one-shot deployment
-rem  Usage (ELEVATED cmd):  deploy_agent.bat ["Clinic-Name"]
-rem  (asks for the clinic name interactively when omitted)
+rem  CPSO scrape agent - deployment and lifecycle
+rem  Usage (ELEVATED cmd):
+rem    deploy_agent.bat ["Clinic-Name"]  full deployment; asks
+rem                                      for the name when omitted
+rem    deploy_agent.bat disable          stop agent + disable the
+rem                                      task, keep installation
+rem    deploy_agent.bat enable           re-enable + start agent
+rem    deploy_agent.bat remove           total cleanup: task, agent
+rem                                      name, and this folder
+rem                                      - Python and git stay
 rem  Prerequisite: git (to clone the repo this script lives in).
 rem  Python is found automatically, in order of preference:
 rem    1. runtime bundled in the repo at .\python\
@@ -28,6 +35,11 @@ if errorlevel 1 (
     exit /b 1
 )
 echo [ ok ] elevated prompt
+
+rem --- lifecycle modes ----------------------------------------
+if /i "%~1"=="disable" goto :mode_disable
+if /i "%~1"=="enable"  goto :mode_enable
+if /i "%~1"=="remove"  goto :mode_remove
 
 rem --- 1. locate python: bundled runtime, else Program Files,
 rem        else download + silent all-users install -------------
@@ -133,4 +145,43 @@ echo.
 echo [ ok ] agent is running. Final check from your desk:
 echo        SELECT host, MAX(log_time) FROM MD_scrape_log GROUP BY host;
 echo === deployment complete ===
+exit /b 0
+
+rem ============================================================
+:mode_disable
+schtasks /end /tn "CPSO scrape agent" >nul 2>&1
+schtasks /change /tn "CPSO scrape agent" /disable >nul 2>&1
+if errorlevel 1 (
+    echo [FAIL] task "CPSO scrape agent" not found - nothing to
+    echo        disable. Run a full deployment first.
+    exit /b 1
+)
+echo [ ok ] agent stopped; task disabled - it will NOT start at
+echo        boot. Installation kept. Re-enable with:
+echo          deploy_agent.bat enable
+exit /b 0
+
+:mode_enable
+schtasks /change /tn "CPSO scrape agent" /enable >nul 2>&1
+if errorlevel 1 (
+    echo [FAIL] task "CPSO scrape agent" not found - run a full
+    echo        deployment first.
+    exit /b 1
+)
+schtasks /run /tn "CPSO scrape agent" >nul
+echo [ ok ] task enabled and agent started.
+exit /b 0
+
+:mode_remove
+schtasks /end /tn "CPSO scrape agent" >nul 2>&1
+schtasks /delete /tn "CPSO scrape agent" /f >nul 2>&1
+echo [ ok ] scheduled task removed
+reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /v CPSO_AGENT_NAME /f >nul 2>&1
+echo [ ok ] agent name removed
+set "TARGET=%~dp0"
+set "TARGET=%TARGET:~0,-1%"
+echo [ ok ] deleting %TARGET% in a few seconds...
+echo        Python and git are left installed.
+echo === removal complete ===
+start "" /min cmd /c ping -n 4 127.0.0.1 ^>nul ^& rd /s /q "%TARGET%"
 exit /b 0
