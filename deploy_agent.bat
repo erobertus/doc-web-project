@@ -2,13 +2,19 @@
 rem ============================================================
 rem  CPSO scrape agent - one-shot deployment
 rem  Usage (ELEVATED cmd):  deploy_agent.bat "Clinic-Name"
-rem  Prerequisites: git + Python, where Python is EITHER the
-rem  classic all-users install (Program Files) OR a runtime
-rem  bundled into the repo:  py install 3.14 --target C:\cpso\python
-rem  This script lives inside the repo.
+rem  Prerequisite: git (to clone the repo this script lives in).
+rem  Python is found automatically, in order of preference:
+rem    1. runtime bundled in the repo at .\python\
+rem       - e.g.  py install 3.14 --target C:\cpso\python
+rem    2. an existing all-users install in Program Files
+rem    3. none of the above: DOWNLOADED from python.org and
+rem       silently installed for all users - PY_VERSION below
 rem ============================================================
 setlocal
 cd /d %~dp0
+
+set "PY_VERSION=3.13.1"
+set "PY_HOME=C:\Program Files\Python313"
 
 echo.
 echo === CPSO agent deployment ===
@@ -22,7 +28,8 @@ if errorlevel 1 (
 )
 echo [ ok ] elevated prompt
 
-rem --- 1. locate python: bundled runtime wins over PATH -------
+rem --- 1. locate python: bundled runtime, else Program Files,
+rem        else download + silent all-users install -------------
 set "PYEXE="
 if exist "%~dp0python\python.exe" set "PYEXE=%~dp0python\python.exe"
 if defined PYEXE goto :python_ok
@@ -30,21 +37,29 @@ if defined PYEXE goto :python_ok
 for /f "delims=" %%p in ('where python 2^>nul') do (
     if not defined PYEXE set "PYEXE=%%p"
 )
-if not defined PYEXE (
-    echo [FAIL] python not found. Either install Python with the
-    echo        CLASSIC installer, "Install for all users" +
-    echo        "Add python.exe to PATH", or bundle a runtime:
-    echo          py install 3.14 --target "%~dp0python"
-    echo        then re-run this script.
+if defined PYEXE (
+    echo %PYEXE% | findstr /i /c:"Program Files" >nul
+    if not errorlevel 1 goto :python_ok
+)
+
+echo [    ] no SYSTEM-visible python - installing %PY_VERSION% for all users...
+curl -L -s -o "%TEMP%\cpso_pysetup.exe" "https://www.python.org/ftp/python/%PY_VERSION%/python-%PY_VERSION%-amd64.exe"
+if errorlevel 1 (
+    echo [FAIL] download from python.org failed - check internet
+    echo        access, or install Python manually and re-run.
     exit /b 1
 )
-echo %PYEXE% | findstr /i /c:"Program Files" >nul
+"%TEMP%\cpso_pysetup.exe" /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
 if errorlevel 1 (
-    echo [FAIL] python resolves to "%PYEXE%" - a per-user install
-    echo        the SYSTEM task cannot see. Either reinstall with
-    echo        the classic installer + "Install for all users",
-    echo        or bundle a runtime into the repo:
-    echo          py install 3.14 --target "%~dp0python"
+    echo [FAIL] silent Python install failed - install manually
+    echo        and re-run this script.
+    exit /b 1
+)
+del "%TEMP%\cpso_pysetup.exe" >nul 2>&1
+set "PYEXE=%PY_HOME%\python.exe"
+if not exist "%PYEXE%" (
+    echo [FAIL] expected "%PYEXE%" after the install - adjust
+    echo        PY_VERSION / PY_HOME at the top of this script.
     exit /b 1
 )
 :python_ok

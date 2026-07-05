@@ -101,26 +101,8 @@ window (right-click cmd → "Run as administrator" — an admin
 account with a normal prompt is NOT enough). The scheduled task
 runs as SYSTEM, so it keeps working after the admin logs out.
 
-1. **Python 3.10+ (3.13/3.14 both fine)** — two supported ways;
-   the deploy script auto-detects either:
-   - **Classic full installer** (`python-3.1x.x-amd64.exe`):
-     Customize installation → tick **"Install for all users"**
-     and **"Add python.exe to PATH"** → installs to
-     `C:\Program Files\Python31x`. NOT the "Python install
-     manager" default flow — its managed installs are per-user
-     under `AppData`, invisible to the SYSTEM task.
-   - **Install-manager `--target` mode** (the path forward once
-     the classic installer is retired in 3.15+): after cloning
-     in step 2, bundle a runtime INSIDE the repo:
-     ```
-     py install 3.14 --target C:\cpso\python
-     ```
-     Both scripts prefer `C:\cpso\python\python.exe` when it
-     exists — no PATH or Program Files involvement at all.
-     (Check `py help install` for the exact option name on
-     your manager version.)
-
-   (git too, if not present: git-scm.com, defaults are fine.)
+1. **git** (git-scm.com, defaults are fine) — the only
+   prerequisite; Python is handled by the deploy script.
 2. **Clone + deploy** (note the branch — the repo default is
    stale):
    ```
@@ -128,13 +110,22 @@ runs as SYSTEM, so it keeps working after the admin logs out.
    C:\cpso\deploy_agent.bat "Clinic-Newmarket"
    ```
    `deploy_agent.bat` (pick a unique clinic name per machine)
-   does the rest and verifies each step: elevation, all-users
-   Python, dependencies into global site-packages (catches the
-   per-user shadowing trap), read-only permissions for clinic
-   users, agent naming, scheduled-task creation, and a smoke
-   check that the agent process is up and polling. It stops
-   with a specific remedy message on any failure, and is safe
-   to re-run after fixing.
+   does everything and verifies each step: elevation; Python —
+   uses a runtime bundled at `C:\cpso\python\` if present, else
+   an existing all-users install, else **downloads Python from
+   python.org and silently installs it for all users**
+   (version pinned in `PY_VERSION` at the top of the script);
+   dependencies into a SYSTEM-visible site-packages (catches
+   the per-user shadowing trap); read-only permissions for
+   clinic users; agent naming; scheduled-task creation; and a
+   smoke check that the agent process is up and polling. It
+   stops with a specific remedy message on any failure and is
+   safe to re-run after fixing.
+
+   Once the classic installer is retired (Python 3.15+), the
+   bundled-runtime route replaces the download:
+   `py install 3.14 --target C:\cpso\python` before running
+   deploy_agent.bat — both scripts prefer it automatically.
 3. **Verify from your desk, then log out**:
    ```sql
    SELECT host, MAX(log_time) FROM MD_scrape_log GROUP BY host;
