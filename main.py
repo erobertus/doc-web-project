@@ -485,7 +485,7 @@ def request_workload(conn: 'connection',
                      min_val=10000,
                      max_val=150000,
                      desc=False,
-                     include_excluded=False) -> tuple:
+                     skip_gaps=False) -> tuple:
     save_commit_state = conn.autocommit
     conn.autocommit = False
     curs = conn.cursor()
@@ -551,13 +551,14 @@ def request_workload(conn: 'connection',
     else:
         order_clause = 'ORDER BY cpso_no'
 
-    # normally a number is skipped when it was scraped within the
-    # freshness window OR is permanently excluded (a known gap);
-    # include_excluded drops the PermExcluded half so those gaps
-    # are re-checked too, still subject to the freshness window
+    # by default a number is skipped only when it was scraped
+    # within the freshness window - known gaps ARE re-checked, so
+    # mid-range numbers newly assigned to a doctor get picked up.
+    # skip_gaps additionally excludes PermExcluded numbers (known
+    # empty spaces) for a fast close-in-time re-sweep.
     fresh_cond = 'updated_date_time > (NOW() - INTERVAL ' \
                  f'{interval} DAY)'
-    if not include_excluded:
+    if skip_gaps:
         fresh_cond = f'({fresh_cond} OR PermExcluded)'
 
     stmt = f'SELECT cpso_no FROM _TMP_{batch_id} ' \
@@ -629,6 +630,16 @@ def update_detail_table(conn: 'connection',
     if batch_id != 0:
         stmt += f' AND batch_uno = {batch_id}'
     curs.execute(stmt, (cpso_no,))
+
+    if not perm_exclude:
+        # a found doctor (or a not-found number above the known
+        # max) is NOT a gap - clear any stale gap flag left on
+        # older batch rows, so a --skip-gaps sweep includes it
+        # again once a former gap has been assigned to a doctor
+        curs.execute(f'UPDATE {BATCH_DET_TBL} SET PermExcluded = 0 '
+                     f'WHERE {C_CPSO_NO} = ? AND PermExcluded',
+                     (cpso_no,))
+
     conn.autocommit = save_commit_state
     conn.commit()
 
@@ -1117,10 +1128,10 @@ def run_sweep(conn: 'connection', http_session,
               cpso_start: int, cpso_stop: int, batch_size: int,
               use_random=True, descending=False,
               delay=DEFAULT_DELAY, quick=False,
-              perm_exclude=False, control_check=None,
+              control_check=None,
               check_every=0,
               interval=DEFAULT_INTERVAL_DAYS,
-              include_excluded=False) -> int:
+              skip_gaps=False) -> int:
     """Work the CPSO number pool until it is exhausted. When
     control_check is given it is consulted between batches; a
     falsy result stops the sweep after the current batch. With
@@ -1139,7 +1150,8 @@ def run_sweep(conn: 'connection', http_session,
                  f'FROM {MD_DIR_TABLE}')
     known_max_cpso = curs.fetchone()[0]
     print(f"Highest CPSO number in database: {known_max_cpso} "
-          f"(missing numbers below it are excluded permanently)")
+          f"(not-found numbers below it are flagged as gaps; "
+          f"{'skipped' if skip_gaps else 're-checked'} this run)")
 
     DB_LOG.log('INFO',
                f'Sweep start: range {cpso_start}-{cpso_stop}, '
@@ -1159,7 +1171,7 @@ def run_sweep(conn: 'connection', http_session,
                                 max_val=cpso_stop,
                                 desc=descending,
                                 interval=interval,
-                                include_excluded=include_excluded)
+                                skip_gaps=skip_gaps)
 
     while len(workload[1]) > 0:
 
@@ -1173,8 +1185,7 @@ def run_sweep(conn: 'connection', http_session,
                 all_recs = scrape_one(
                     conn, cpso_no,
                     batch_id=batch_no,
-                    exclude_invalid=(perm_exclude or
-                                     cpso_no <= known_max_cpso),
+                    exclude_invalid=(cpso_no <= known_max_cpso),
                     session=http_session)
 
                 if len(all_recs) > 0:
@@ -1270,7 +1281,7 @@ def run_sweep(conn: 'connection', http_session,
                                     max_val=cpso_stop,
                                     desc=descending,
                                     interval=interval,
-                                    include_excluded=include_excluded)
+                                    skip_gaps=skip_gaps)
 
     DB_LOG.log('INFO', f'Sweep finished: {processed} processed')
     return processed
@@ -1293,7 +1304,7 @@ def read_control(conn: 'connection'):
     variants = (
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, log_verbose+0, auto_update_hrs, '
-         f'include_excluded+0, CURTIME()', 'exclude'),
+         f'skip_gaps+0, CURTIME()', 'skipgaps'),
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, log_verbose+0, auto_update_hrs, '
          f'CURTIME()', 'update'),
@@ -1344,11 +1355,11 @@ def read_control(conn: 'connection'):
            'interval': None,
            'log_verbose': None,
            'auto_update_hrs': None,
-           'include_excluded': False,
+           'skip_gaps': False,
            'now': row[-1]}
 
     optional = ('abort_check', 'window', 'interval', 'verbose',
-                'update', 'exclude')
+                'update', 'skipgaps')
     if level in optional:
         ctl['abort_check'] = row[8]
     if level in optional[1:]:
@@ -1360,8 +1371,8 @@ def read_control(conn: 'connection'):
         ctl['log_verbose'] = bool(row[12])
     if level in optional[4:]:
         ctl['auto_update_hrs'] = row[13]
-    if level == 'exclude':
-        ctl['include_excluded'] = bool(row[14])
+    if level == 'skipgaps':
+        ctl['skip_gaps'] = bool(row[14])
 
     ctl['in_window'] = in_time_window(ctl['now'],
                                       ctl['run_from'],
@@ -1666,7 +1677,7 @@ def run_agent(args, conn: 'connection'):
                             ctl['interval']
                             if ctl['interval'] is not None
                             else args.interval),
-                        include_excluded=ctl['include_excluded'])
+                        skip_gaps=ctl['skip_gaps'])
 
                     after = read_control(conn)
                     if after is not None and after['go'] \
@@ -1828,15 +1839,6 @@ if __name__ == '__main__':
                              'to the central log); in agent mode '
                              'the log_verbose control column '
                              'takes precedence')
-    parser.add_argument('--include-excluded',
-                        action='store_true',
-                        help='also re-scrape permanently excluded '
-                             'CPSO numbers (known gaps below the '
-                             'database maximum); normally skipped. '
-                             'Still subject to the freshness '
-                             'window. Agent mode is governed by '
-                             'the include_excluded control column '
-                             'instead of this flag')
     parser.add_argument('-i', '--interval', type=int,
                         default=DEFAULT_INTERVAL_DAYS,
                         metavar='DAYS',
@@ -1889,20 +1891,17 @@ if __name__ == '__main__':
                         help='seconds to wait between two '
                              'physician downloads '
                              f'(default={DEFAULT_DELAY})')
-    parser.add_argument('--perm-exclude',
+    parser.add_argument('--skip-gaps',
                         action='store_true',
-                        help='permanently exclude ALL CPSO '
-                             'numbers that are not found on the '
-                             'register. By default only numbers '
-                             'BELOW the highest CPSO number '
-                             'already in the database are '
-                             'excluded (CPSO numbers are ever-'
-                             'increasing, so gaps between '
-                             'existing doctors are never filled '
-                             'in); numbers above it are re-'
-                             'checked on the next run because '
-                             'they may be issued to newly '
-                             'registered doctors')
+                        help='skip known gaps (CPSO numbers below '
+                             'the database maximum that were not '
+                             'found on the register) for a fast '
+                             'close-in-time re-sweep. By DEFAULT '
+                             'those gaps are re-checked, so mid-'
+                             'range numbers newly assigned to a '
+                             'doctor are picked up. Agent mode is '
+                             'governed by the skip_gaps control '
+                             'column instead of this flag')
     args = parser.parse_args()
 
     STALE_MINUTES_ACTIVE = args.stale_minutes
@@ -1954,7 +1953,7 @@ if __name__ == '__main__':
               f"Random     : {USE_RANDOM}\n"
               f"Batch size : {BATCH_SIZE}\n"
               f"Delay      : {args.delay}\n"
-              f"Perm excl. : {args.perm_exclude}\n"
+              f"Skip gaps  : {args.skip_gaps}\n"
               f"Quick mode : {args.quick}\n"
               f"======================================")
 
@@ -1996,9 +1995,8 @@ if __name__ == '__main__':
                   descending=args.descending,
                   delay=args.delay,
                   quick=args.quick,
-                  perm_exclude=args.perm_exclude,
                   check_every=args.abort_check,
                   interval=args.interval,
-                  include_excluded=args.include_excluded)
+                  skip_gaps=args.skip_gaps)
     curs.close()
     connect_db.close()

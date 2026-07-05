@@ -73,14 +73,19 @@ lines so nothing is lost; the geocode probe deals with them.
    (e.g. CPSO 10310): those rows are **kept** in `z847e_MD_dir`
    and flagged with the `Not on Register` status (auto-created on
    first use); nothing else is touched.
-2. **Smarter permanent exclusion.** CPSO numbers are
-   ever-increasing and gaps are never re-issued, so a number that
-   is not found and lies *below* the highest CPSO number already
-   in the database is permanently excluded (as before). Numbers
-   *above* the database maximum are only marked completed for the
-   current run and re-checked next run — they may belong to
-   doctors registered after this run. `--perm-exclude` forces the
-   old exclude-everything behaviour.
+2. **Gaps are re-checked by default; `--skip-gaps` skips them.**
+   A not-found number *below* the highest CPSO number in the
+   database is flagged as a "gap" (`PermExcluded`) so we keep a
+   registry of known empty spaces. By **default those gaps are
+   still re-scraped** every run (subject to the freshness
+   window), because the register does occasionally assign
+   mid-range numbers — so a gap that becomes a doctor is picked
+   up, and its gap flag is cleared automatically. For a fast
+   close-in-time re-sweep (testing, quick→deep, re-running a
+   range) pass `--skip-gaps` (or set the `skip_gaps` control
+   column) to skip the known gaps and avoid wasting requests on
+   empty spaces. Numbers *above* the database maximum are never
+   flagged — they may belong to future registrants.
 3. **Renamed reference values.** The new site says `Active` where
    the old one said `Active Member`, `Deceased` instead of
    `Expired: Member deceased`, and `Man`/`Woman` instead of
