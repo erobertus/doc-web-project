@@ -1545,7 +1545,19 @@ def run_agent(args, conn: 'connection'):
 
     print(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
           f'every {args.poll_interval} sec. Ctrl-C to stop.')
-    DB_LOG.log('INFO', 'agent started')
+    # record the effective config so each machine's settings are
+    # visible centrally (run_agent.bat exports the log-rotation
+    # values into the environment, so os.environ reflects what is
+    # actually in force)
+    kports, kproto, _ = knock_config_from_env()
+    knock_desc = f'{kproto} x{len(kports)}' if kports else 'off'
+    log_cap = os.environ.get('CPSO_LOG_MAX_MB',
+                             str(DEFAULT_LOG_MAX_MB))
+    log_keep = os.environ.get('CPSO_LOG_KEEP', '3')
+    DB_LOG.log('INFO',
+               f'agent started (version {DB_LOG.version}, '
+               f'poll {args.poll_interval}s, knock {knock_desc}, '
+               f'log cap {log_cap}MB x{log_keep})')
 
     def do_update(reason):
         """git pull; restart (exit 43) only if code changed."""
