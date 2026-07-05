@@ -166,7 +166,16 @@ admin logs out (or never logs in again).
    - Database error here = the machine cannot reach
      `faxcomet.com:3306` (clinic firewall) — fix before
      continuing.
-6. **Schedule it** (admin cmd window):
+6. **Name the machine** (recommended) — the central log
+   identifies machines by Windows hostname plus connection
+   origin, but a friendly per-clinic name is much easier to read
+   in reports:
+   ```
+   setx CPSO_AGENT_NAME "Clinic-Newmarket" /M
+   ```
+   (machine-wide, picked up by the SYSTEM task after the next
+   task restart; pick any short unique name per office)
+7. **Schedule it** (admin cmd window):
    ```
    schtasks /create /tn "CPSO scrape agent" /sc onstart ^
      /tr "C:\cpso\run_agent.bat" /ru SYSTEM
@@ -175,7 +184,7 @@ admin logs out (or never logs in again).
    The agent now runs headless (no visible window), survives
    reboots and logouts, restarts itself after crashes, and logs
    everything to `C:\cpso\agent.log`.
-7. **Verify, then log out**: `C:\cpso\agent.log` should show
+8. **Verify, then log out**: `C:\cpso\agent.log` should show
    `Agent mode: polling MD_scrape_control...` within a minute,
    and the machine appears centrally:
    ```sql

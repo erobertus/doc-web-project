@@ -2,6 +2,7 @@
 # (rewritten for the new register.cpso.on.ca site, 2026)
 
 
+import os
 import sys
 import mariadb
 import time
@@ -30,7 +31,12 @@ class DbLogger:
         self.verbose = False
         self.conn = None
         self.params = None
-        self.host = socket.gethostname()
+        # CPSO_AGENT_NAME (e.g. 'Clinic-Newmarket') beats the bare
+        # Windows machine name, which says nothing about location
+        self.host = os.environ.get('CPSO_AGENT_NAME') \
+            or socket.gethostname()
+        self._origin_added = bool(
+            os.environ.get('CPSO_AGENT_NAME'))
 
     def debug(self, message, cpso_no=None, batch_uno=None):
         """Per-doctor detail rows; written only in verbose mode
@@ -48,6 +54,21 @@ class DbLogger:
         try:
             self.conn = mariadb.connect(autocommit=True,
                                         **self.params)
+            if not self._origin_added:
+                # append the connection origin as the server sees
+                # it (clinic public IP / reverse DNS) - the bare
+                # machine name alone does not identify the office
+                try:
+                    curs = self.conn.cursor()
+                    curs.execute(
+                        "SELECT SUBSTRING_INDEX(USER(), '@', -1)")
+                    (origin,) = curs.fetchone()
+                    if origin and origin not in self.host:
+                        self.host = (f'{self.host} @ '
+                                     f'{origin}')[:128]
+                    self._origin_added = True
+                except mariadb.Error:
+                    pass
             return True
         except mariadb.Error as e:
             if not silent:
