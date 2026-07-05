@@ -61,6 +61,21 @@ ALTER TABLE MD_addresses              CONVERT TO CHARACTER SET utf8mb4 COLLATE u
 -- legacy 50-char host column
 ALTER TABLE MD_batch_header MODIFY host VARCHAR(128) DEFAULT NULL;
 
+-- add the periodic-update column to the control table (optional)
+ALTER TABLE MD_scrape_control
+  ADD COLUMN auto_update_hrs INT DEFAULT 0 AFTER log_verbose;
+
+-- central fleet commands: push code updates and self-destruct to
+-- machines by host pattern (agents fall back to disabled if this
+-- table is absent)
+CREATE TABLE IF NOT EXISTS MD_scrape_command (
+  cmd_uno      INT AUTO_INCREMENT PRIMARY KEY,
+  host_pattern VARCHAR(128) NOT NULL,   -- SQL LIKE: 'Clinic-%','%',exact
+  command      VARCHAR(16)  NOT NULL,   -- 'update' or 'destruct'
+  created      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  note         VARCHAR(255) NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- clear any leftover abort flag / stale open batches
 DELETE FROM MD_batch_header
 WHERE host = '!!!ABORT_ALL' AND batch_size < 0;
@@ -308,6 +323,27 @@ WHERE log_time < NOW() - INTERVAL 60 DAY;
 --   C:\cpso\deploy_agent.bat enable    re-enable + start
 --   C:\cpso\deploy_agent.bat remove    task + name + C:\cpso gone
 --                                      - Python and git stay
+
+-- CENTRAL fleet commands (host_pattern is a SQL LIKE, matched
+-- against the agent name shown in MD_scrape_log.host):
+--   push a code update to all clinics
+INSERT INTO MD_scrape_command (host_pattern, command)
+VALUES ('%', 'update');
+--   update just the Newmarket machine
+INSERT INTO MD_scrape_command (host_pattern, command)
+VALUES ('Clinic-Newmarket', 'update');
+--   self-destruct every clinic machine (uninstalls the agent;
+--   Python + git stay)
+INSERT INTO MD_scrape_command (host_pattern, command)
+VALUES ('Clinic-%', 'destruct');
+-- Agents act within one poll interval; each command runs once
+-- per machine. 'update' = git pull + restart (only if the code
+-- changed); 'destruct' runs deploy_agent.bat remove.
+
+-- periodic hands-off updates: pull every N hours (0 = off; on-
+-- demand commands still work). Use with care - a bad commit
+-- reaches the whole fleet automatically.
+UPDATE MD_scrape_control SET auto_update_hrs = 24;
 ```
 
 Notes:

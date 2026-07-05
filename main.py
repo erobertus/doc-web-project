@@ -8,6 +8,7 @@ import mariadb
 import time
 import socket
 import traceback
+import subprocess
 import argparse
 from time import sleep
 from datetime import timedelta
@@ -1258,6 +1259,9 @@ def read_control(conn: 'connection'):
     # machine's local timezone is set.
     variants = (
         (f'{base_cols}, abort_check, run_from, run_until, '
+         f'interval_days, log_verbose+0, auto_update_hrs, '
+         f'CURTIME()', 'update'),
+        (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, log_verbose+0, CURTIME()', 'verbose'),
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, CURTIME()', 'interval'),
@@ -1303,17 +1307,22 @@ def read_control(conn: 'connection'):
            'run_until': None,
            'interval': None,
            'log_verbose': None,
+           'auto_update_hrs': None,
            'now': row[-1]}
 
-    if level in ('abort_check', 'window', 'interval', 'verbose'):
+    optional = ('abort_check', 'window', 'interval', 'verbose',
+                'update')
+    if level in optional:
         ctl['abort_check'] = row[8]
-    if level in ('window', 'interval', 'verbose'):
+    if level in optional[1:]:
         ctl['run_from'] = row[9]
         ctl['run_until'] = row[10]
-    if level in ('interval', 'verbose'):
+    if level in optional[2:]:
         ctl['interval'] = row[11]
-    if level == 'verbose':
+    if level in optional[3:]:
         ctl['log_verbose'] = bool(row[12])
+    if level == 'update':
+        ctl['auto_update_hrs'] = row[13]
 
     ctl['in_window'] = in_time_window(ctl['now'],
                                       ctl['run_from'],
@@ -1335,6 +1344,132 @@ def in_time_window(now_td, from_td, until_td) -> bool:
     if start < end:
         return start <= now_td < end
     return now_td >= start or now_td < end
+
+
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+# suppress console flashes when the SYSTEM task shells out to git
+_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+
+
+def _find_git():
+    """Locate git under the SYSTEM account (it may not be on the
+    task's PATH even though the installer added it)."""
+    candidates = ['git',
+                  os.path.join(os.environ.get('ProgramFiles', ''),
+                               'Git', 'cmd', 'git.exe'),
+                  os.path.join(os.environ.get('ProgramFiles(x86)',
+                                              ''),
+                               'Git', 'cmd', 'git.exe')]
+    for git in candidates:
+        try:
+            subprocess.run([git, '--version'],
+                           capture_output=True, timeout=15,
+                           creationflags=_NO_WINDOW)
+            return git
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return None
+
+
+def git_pull() -> tuple:
+    """Fast-forward the local repo. Returns (ok, changed, text)."""
+    git = _find_git()
+    if git is None:
+        return False, False, 'git not found'
+    try:
+        r = subprocess.run([git, '-C', REPO_DIR, 'pull',
+                            '--ff-only'],
+                           capture_output=True, text=True,
+                           timeout=180, creationflags=_NO_WINDOW)
+        out = ((r.stdout or '') + (r.stderr or '')).strip()
+        changed = (r.returncode == 0
+                   and 'up to date' not in out.lower())
+        return r.returncode == 0, changed, out
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, False, repr(e)
+
+
+def _cmd_pos_path():
+    return os.path.join(REPO_DIR, CMD_POS_FILE)
+
+
+def _read_cmd_pos():
+    """Highest command id already acted on, or None on first run."""
+    try:
+        with open(_cmd_pos_path()) as f:
+            return int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _write_cmd_pos(uno) -> bool:
+    try:
+        with open(_cmd_pos_path(), 'w') as f:
+            f.write(str(uno))
+        return True
+    except OSError as e:
+        print(f'Could not persist command position: {e}')
+        return False
+
+
+_commands_available = True
+
+
+def process_commands(conn: 'connection', host: str):
+    """Check MD_scrape_command for rows targeting this host
+    (host_pattern is a SQL LIKE) that have not been acted on yet.
+    Returns 'destruct', 'update', or None. The position is
+    persisted BEFORE acting so a command never re-runs after a
+    restart (which would loop). On first run it fast-forwards past
+    any pre-existing commands so a freshly deployed agent only
+    obeys commands issued after it came online. Disables itself
+    (returns None) when the command table does not exist, so the
+    feature is optional."""
+    global _commands_available
+    if not _commands_available:
+        return None
+
+    curs = conn.cursor()
+    try:
+        last = _read_cmd_pos()
+        if last is None:
+            curs.execute(f'SELECT COALESCE(MAX(cmd_uno), 0) '
+                         f'FROM {CMD_TBL}')
+            (mx,) = curs.fetchone()
+            _write_cmd_pos(mx)
+            return None
+
+        curs.execute(
+            f'SELECT cmd_uno, command FROM {CMD_TBL} '
+            f'WHERE cmd_uno > ? AND ? LIKE host_pattern '
+            f'ORDER BY cmd_uno', (last, host))
+        rows = curs.fetchall()
+    except mariadb.Error as e:
+        # 1146 = table missing: the command feature is not set up
+        # on this database; disable it rather than treating it as
+        # a connection failure (which would loop the reconnect)
+        if getattr(e, 'errno', None) == 1146:
+            _commands_available = False
+            return None
+        raise
+    finally:
+        try:
+            conn.commit()
+        except mariadb.Error:
+            pass
+
+    action = None
+    for (uno, command) in rows:
+        if not _write_cmd_pos(uno):
+            # cannot record progress - skip rather than risk a
+            # re-run loop; try again next poll
+            break
+        cmd = (command or '').strip().lower()
+        if cmd == 'destruct':
+            return 'destruct'      # destruct wins, act at once
+        if cmd == 'update':
+            action = 'update'      # newest update; keep scanning
+    return action
 
 
 def agent_log_oversized() -> bool:
@@ -1367,14 +1502,47 @@ def run_agent(args, conn: 'connection'):
                                  # last fully exhausted sweep
     completed_time = 0.0
     waiting_logged = False
+    last_auto_update = time.time()
 
     print(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
           f'every {args.poll_interval} sec. Ctrl-C to stop.')
     DB_LOG.log('INFO', 'agent started')
 
+    def do_update(reason):
+        """git pull; restart (exit 43) only if code changed."""
+        ok, changed, out = git_pull()
+        DB_LOG.log('INFO', f'{reason}: {out[:200]}')
+        print(f'{reason}: {out[:200]}')
+        if changed:
+            print('Updated - restarting to load new code.')
+            sys.exit(AGENT_UPDATE_EXIT)
+
     while True:
         try:
+            # central fleet commands (update / destruct), targeted
+            # by host pattern - checked before anything else
+            action = process_commands(conn, DB_LOG.host)
+            if action == 'destruct':
+                print('Central DESTRUCT command - uninstalling '
+                      'this agent.')
+                DB_LOG.log('WARN', 'destruct command received - '
+                           'uninstalling')
+                sys.exit(AGENT_DESTRUCT_EXIT)
+            elif action == 'update':
+                do_update('update command')
+
             ctl = read_control(conn)
+
+            # periodic self-update (auto_update_hrs > 0)
+            hrs = None
+            if ctl is not None:
+                hrs = ctl.get('auto_update_hrs')
+            if hrs is None:
+                hrs = DEFAULT_AUTO_UPDATE_HRS
+            if hrs and (time.time() - last_auto_update
+                        >= hrs * 3600):
+                last_auto_update = time.time()
+                do_update(f'periodic update ({hrs}h)')
 
             if ctl is None:
                 print(f'Agent: {CONTROL_TBL} is empty; waiting '

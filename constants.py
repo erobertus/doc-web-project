@@ -28,6 +28,21 @@ STALE_BATCH_MINUTES = 30
 DEFAULT_LOG_MAX_MB = 20
 AGENT_ROTATE_EXIT = 42
 
+# central fleet commands: rows in MD_scrape_command target agents
+# by host_pattern (a SQL LIKE, so 'Clinic-%' / '%' / an exact
+# name all work) and tell them to 'update' (git pull + restart) or
+# 'destruct' (uninstall). The agent exits with these codes so
+# run_agent.bat can do the git / uninstall work in the shell.
+CMD_TBL = 'MD_scrape_command'
+AGENT_UPDATE_EXIT = 43
+AGENT_DESTRUCT_EXIT = 44
+# name of the local file tracking the last command already acted
+# on (kept next to main.py); prevents re-running on restart
+CMD_POS_FILE = 'agent_cmd.pos'
+# periodic self-update: git pull every this many hours (control
+# column auto_update_hrs overrides; 0 = only on-demand commands)
+DEFAULT_AUTO_UPDATE_HRS = 0
+
 # --agent mode: central control table and poll cadence
 CONTROL_TBL = 'MD_scrape_control'
 AGENT_POLL_SECS = 120

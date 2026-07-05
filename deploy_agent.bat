@@ -31,14 +31,17 @@ set "PY_FALLBACK=3.13.1"
 echo.
 echo === CPSO agent deployment ===
 
-rem --- 0. must be elevated -----------------------------------
+rem --- 0. must be elevated (or SYSTEM, e.g. a self-destruct
+rem        invoked by the agent's own scheduled task) -----------
 net session >nul 2>&1
-if errorlevel 1 (
-    echo [FAIL] This window is not elevated. Right-click cmd,
-    echo        "Run as administrator", and re-run this script.
-    exit /b 1
-)
-echo [ ok ] elevated prompt
+if not errorlevel 1 goto :priv_ok
+whoami 2>nul | find /i "system" >nul 2>&1
+if not errorlevel 1 goto :priv_ok
+echo [FAIL] This window is not elevated. Right-click cmd,
+echo        "Run as administrator", and re-run this script.
+exit /b 1
+:priv_ok
+echo [ ok ] elevated / SYSTEM
 
 rem --- lifecycle modes ----------------------------------------
 if /i "%~1"=="disable" goto :mode_disable

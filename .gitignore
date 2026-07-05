@@ -1,3 +1,6 @@
 __pycache__/
 venv/
 .idea/
+agent.log
+agent.log.*
+agent_cmd.pos
