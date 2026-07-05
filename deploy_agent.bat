@@ -1,7 +1,8 @@
 @echo off
 rem ============================================================
 rem  CPSO scrape agent - one-shot deployment
-rem  Usage (ELEVATED cmd):  deploy_agent.bat "Clinic-Name"
+rem  Usage (ELEVATED cmd):  deploy_agent.bat ["Clinic-Name"]
+rem  (asks for the clinic name interactively when omitted)
 rem  Prerequisite: git (to clone the repo this script lives in).
 rem  Python is found automatically, in order of preference:
 rem    1. runtime bundled in the repo at .\python\
@@ -89,13 +90,17 @@ icacls "%~dp0." /remove:g "Authenticated Users" /t >nul 2>&1
 echo [ ok ] permissions tightened - users read-only
 
 rem --- 4. per-clinic agent name -------------------------------
-if "%~1"=="" (
-    echo [warn] no clinic name given - the central log will show
+set "AGENT_NAME=%~1"
+if not defined AGENT_NAME (
+    set /p AGENT_NAME=Clinic name for this machine [Enter = use hostname]:
+)
+if not defined AGENT_NAME (
+    echo [warn] no clinic name - the central log will show
     echo        "hostname @ connection-origin" instead. To name it
     echo        later:  setx CPSO_AGENT_NAME "Clinic-X" /M
 ) else (
-    setx CPSO_AGENT_NAME "%~1" /M >nul
-    echo [ ok ] agent name: %~1
+    setx CPSO_AGENT_NAME "%AGENT_NAME%" /M >nul
+    echo [ ok ] agent name: %AGENT_NAME%
 )
 
 rem --- 5. scheduled task (SYSTEM, at boot, start now) ---------
