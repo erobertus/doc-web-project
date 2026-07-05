@@ -20,6 +20,14 @@ LOG_TBL = 'MD_scrape_log'
 # (closed + its unfinished numbers released); 0 disables reaping
 STALE_BATCH_MINUTES = 30
 
+# local agent.log rotation: Windows will not let anything rotate
+# the file while run_agent.bat holds it open, so the agent exits
+# with AGENT_ROTATE_EXIT when its log passes the cap and the
+# wrapper rotates + restarts it. Cap/keep are read from the
+# CPSO_LOG_MAX_MB / CPSO_LOG_KEEP env vars (defaults below).
+DEFAULT_LOG_MAX_MB = 20
+AGENT_ROTATE_EXIT = 42
+
 # --agent mode: central control table and poll cadence
 CONTROL_TBL = 'MD_scrape_control'
 AGENT_POLL_SECS = 120

@@ -318,8 +318,13 @@ Notes:
 - Leaving `go_flag = 1` permanently is the intended standing
   mode: agents sweep nightly inside the window and only touch
   doctors older than `interval_days`.
-- `agent.log` grows slowly; delete it any time, the agent
-  recreates it.
+- `agent.log` self-rotates: run_agent.bat keeps it under
+  `CPSO_LOG_MAX_MB` (default 20) across `CPSO_LOG_KEEP` (default
+  3) generations — `agent.log`, `agent.log.1`, ... — so local
+  disk use is bounded (~cap x keep). Tune per machine:
+  `setx CPSO_LOG_MAX_MB 50 /M` and/or `setx CPSO_LOG_KEEP 5 /M`,
+  then restart the task. (The central `MD_scrape_log` is the
+  fleet-wide record; agent.log is just a local tail.)
 
 ## 4. Troubleshooting
 

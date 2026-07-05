@@ -1337,6 +1337,26 @@ def in_time_window(now_td, from_td, until_td) -> bool:
     return now_td >= start or now_td < end
 
 
+def agent_log_oversized() -> bool:
+    """True when run_agent.bat's redirected log (path in
+    CPSO_AGENT_LOG) has grown past CPSO_LOG_MAX_MB. Windows will
+    not let anything rotate the file while the wrapper holds it
+    open, so the agent hands control back (exits
+    AGENT_ROTATE_EXIT) and the wrapper rotates + restarts it."""
+    path = os.environ.get('CPSO_AGENT_LOG')
+    if not path:
+        return False
+    try:
+        mb = float(os.environ.get('CPSO_LOG_MAX_MB',
+                                  str(DEFAULT_LOG_MAX_MB)))
+    except ValueError:
+        mb = DEFAULT_LOG_MAX_MB
+    try:
+        return os.path.getsize(path) >= mb * 1024 * 1024
+    except OSError:
+        return False
+
+
 def run_agent(args, conn: 'connection'):
     """Unattended mode for fleet machines: poll the control table
     and run sweeps with the parameters stored there while go_flag
@@ -1392,7 +1412,8 @@ def run_agent(args, conn: 'connection'):
                     def keep_running():
                         c = read_control(conn)
                         return (c is not None and c['go']
-                                and c['in_window'])
+                                and c['in_window']
+                                and not agent_log_oversized())
 
                     n = run_sweep(
                         conn, http_session,
@@ -1431,6 +1452,15 @@ def run_agent(args, conn: 'connection'):
                         # as soon as go/window allows
                         completed_marker = None
                         completed_time = 0.0
+
+            # hand control back to run_agent.bat so it can rotate
+            # the (Windows-locked) local log, then restart us
+            if agent_log_oversized():
+                print('Local log reached its size cap - exiting '
+                      'for rotation; run_agent.bat restarts '
+                      'immediately.')
+                DB_LOG.log('INFO', 'local log rotation restart')
+                sys.exit(AGENT_ROTATE_EXIT)
 
             time.sleep(args.poll_interval)
 
