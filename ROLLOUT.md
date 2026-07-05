@@ -96,106 +96,48 @@ UPDATE MD_scrape_control SET
 
 ## 1. Per-machine install (each clinic PC)
 
-Do the whole installation from the **admin account** — the
-scheduled task runs as SYSTEM, so it keeps working after the
-admin logs out (or never logs in again).
+Everything from the **admin account**, in an **ELEVATED** cmd
+window (right-click cmd → "Run as administrator" — an admin
+account with a normal prompt is NOT enough). The scheduled task
+runs as SYSTEM, so it keeps working after the admin logs out.
 
 1. **Python 3.10+ (3.13/3.14 both fine)** — use the CLASSIC
    full installer (`python-3.1x.x-amd64.exe` from python.org):
    Customize installation → tick **"Install for all users"** and
    **"Add python.exe to PATH"** → installs to
-   `C:\Program Files\Python31x`. Verify:
-   `where python` must show a `C:\Program Files\...` path.
+   `C:\Program Files\Python31x`.
    AVOID the "Python install manager" variant — it installs
-   per-user under `C:\Users\<name>\AppData\Local\Python`, whose
-   PATH entry the SYSTEM task does not see (agent dies with
-   `'python' is not recognized`).
-2. **Get the code** (note the branch — the repo default is stale):
+   per-user under `AppData`, invisible to the SYSTEM task.
+   (git too, if not present: git-scm.com, defaults are fine.)
+2. **Clone + deploy** (note the branch — the repo default is
+   stale):
    ```
-   cd C:\
-   git clone -b geocode_on_the_fly https://github.com/erobertus/doc-web-project.git cpso
+   git clone -b geocode_on_the_fly https://github.com/erobertus/doc-web-project.git C:\cpso
+   C:\cpso\deploy_agent.bat "Clinic-Newmarket"
    ```
-   Keep it at a machine-wide path like `C:\cpso` — not under a
-   user profile. No git on the machine? Copy the project folder
-   from a USB stick / network share instead.
-3. **Dependencies** — from an **elevated** prompt (right-click
-   cmd → "Run as administrator"; an admin account with a normal
-   prompt is NOT enough):
-   ```
-   cd C:\cpso
-   pip install -r requirements.txt
-   python -c "import sys, mariadb; print(sys.executable); print(mariadb.__file__)"
-   ```
-   The install output must NOT say "Defaulting to user
-   installation" and the two printed paths must start with
-   `C:\Program Files\` — that is the proof the SYSTEM task will
-   find everything. If `mariadb` fails to install, install the
-   "Microsoft Visual C++ Redistributable (x64)" and retry.
-
-   If pip was accidentally run WITHOUT elevation first, a later
-   elevated run reports "Requirement already satisfied" from
-   `AppData\Roaming\Python` and installs nothing. Remedy:
-   ```
-   rmdir /s /q "C:\Users\<admin>\AppData\Roaming\Python"
-   pip install -r requirements.txt
-   ```
-   then re-run the verification one-liner.
-4. **Permissions** (recommended): the Windows default ACL under
-   `C:\` usually lets Authenticated Users MODIFY subfolders —
-   i.e. the non-admin clinic account could edit scripts that run
-   as SYSTEM and contain the DB credentials. Tighten:
-   ```
-   icacls C:\cpso /inheritance:d
-   icacls C:\cpso /remove:g "Authenticated Users" /t
-   ```
-   Result: Administrators + SYSTEM keep full control, regular
-   users can still READ (view agent.log) but not modify the
-   code. Note UAC: after this, `git pull` (and any other write
-   to C:\cpso) needs an ELEVATED prompt — a normal prompt under
-   the admin account runs with a filtered token and is
-   effectively read-only here. Check with `icacls C:\cpso` —
-   if there is no `Authenticated Users:...(M)` line to begin
-   with, skip this.
-5. **Connectivity check** (go_flag is still 0, so nothing is
-   scraped — you should see it polling and staying idle):
-   ```
-   python main.py --agent --poll-interval 15
-   ```
-   Wait ~20 s, confirm `Agent mode: polling MD_scrape_control...`
-   and no database errors, then Ctrl-C.
-   - Database error here = the machine cannot reach
-     `faxcomet.com:3306` (clinic firewall) — fix before
-     continuing.
-6. **Name the machine** (recommended) — the central log
-   identifies machines by Windows hostname plus connection
-   origin, but a friendly per-clinic name is much easier to read
-   in reports:
-   ```
-   setx CPSO_AGENT_NAME "Clinic-Newmarket" /M
-   ```
-   (machine-wide, picked up by the SYSTEM task after the next
-   task restart; pick any short unique name per office)
-7. **Schedule it** (admin cmd window):
-   ```
-   schtasks /create /tn "CPSO scrape agent" /sc onstart ^
-     /tr "C:\cpso\run_agent.bat" /ru SYSTEM
-   schtasks /run /tn "CPSO scrape agent"
-   ```
-   The agent now runs headless (no visible window), survives
-   reboots and logouts, restarts itself after crashes, and logs
-   everything to `C:\cpso\agent.log`.
-8. **Verify, then log out**: `C:\cpso\agent.log` should show
-   `Agent mode: polling MD_scrape_control...` within a minute,
-   and the machine appears centrally:
+   `deploy_agent.bat` (pick a unique clinic name per machine)
+   does the rest and verifies each step: elevation, all-users
+   Python, dependencies into global site-packages (catches the
+   per-user shadowing trap), read-only permissions for clinic
+   users, agent naming, scheduled-task creation, and a smoke
+   check that the agent process is up and polling. It stops
+   with a specific remedy message on any failure, and is safe
+   to re-run after fixing.
+3. **Verify from your desk, then log out**:
    ```sql
    SELECT host, MAX(log_time) FROM MD_scrape_log GROUP BY host;
    ```
-   Log the admin out, wait a few minutes, re-run the query —
-   the timestamp keeps advancing.
+   The clinic name appears; log the admin out, wait a few
+   minutes, re-run — the timestamp keeps advancing.
 
-Repeat on the next machine. Machines are identical — no
-per-machine configuration. Future code updates: `git pull` from
-the admin account (regular users have read-only access).
+Notes:
+- After deployment, writes to `C:\cpso` (e.g. `git pull` for
+  updates) need an ELEVATED prompt — UAC gives a normal admin
+  prompt a filtered, effectively read-only token there.
+- A database error during the smoke check means the machine
+  cannot reach `faxcomet.com:3306` (clinic firewall).
+- No git on the machine? Copy the project folder from a USB
+  stick to `C:\cpso` and run the same deploy_agent.bat.
 
 ---
 
