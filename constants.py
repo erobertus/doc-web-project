@@ -6,6 +6,11 @@ SECONDS_TO_WAIT = 10
 # towards the register site; override with --delay)
 DEFAULT_DELAY = 1.0
 
+# random +/- jitter (seconds) added to each delay so the fleet's
+# requests do not fall into lock-step; 0 = fixed delay. e.g.
+# delay 1.0 + jitter 0.5 -> each pause is uniform in [0.5, 1.5]
+DEFAULT_DELAY_JITTER = 0.0
+
 # days before a doctor's record is considered stale and offered
 # for re-scraping (override with --interval or the control
 # table's interval_days column)

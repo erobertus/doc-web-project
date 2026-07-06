@@ -81,6 +81,11 @@ ALTER TABLE MD_batch_header MODIFY host VARCHAR(128) DEFAULT NULL;
 ALTER TABLE MD_scrape_control
   ADD COLUMN auto_update_hrs INT DEFAULT 0 AFTER log_verbose;
 
+-- random +/- jitter (seconds) on the courtesy delay so the fleet
+-- does not fall into lock-step. 0 = fixed delay.
+ALTER TABLE MD_scrape_control
+  ADD COLUMN delay_jitter FLOAT DEFAULT 0 AFTER skip_gaps;
+
 -- skip known gaps (not-found numbers below the DB max) for fast
 -- close-in-time re-sweeps. DEFAULT 0 = re-check gaps (thorough,
 -- catches newly-assigned mid-range numbers)
@@ -298,6 +303,9 @@ UPDATE MD_scrape_control SET go_flag = 0;
 
 -- switch nightly refresh <-> full detail sweep
 UPDATE MD_scrape_control SET quick_mode = 1;   -- or 0
+
+-- jitter the delay: 1 s base +/- 0.5 s -> each pause 0.5-1.5 s
+UPDATE MD_scrape_control SET delay_sec = 1.0, delay_jitter = 0.5;
 
 -- discovery pass for NEW doctors (sequential over the top range)
 UPDATE MD_scrape_control SET use_random = 0,

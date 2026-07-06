@@ -7,6 +7,7 @@ import sys
 import mariadb
 import time
 import socket
+import random
 import traceback
 import subprocess
 import argparse
@@ -1223,7 +1224,8 @@ def run_sweep(conn: 'connection', http_session,
               check_every=0,
               interval=DEFAULT_INTERVAL_DAYS,
               skip_gaps=False,
-              sweep_start=None) -> int:
+              sweep_start=None,
+              delay_jitter=DEFAULT_DELAY_JITTER) -> int:
     """Work the CPSO number pool until it is exhausted. When
     control_check is given it is consulted between batches; a
     falsy result stops the sweep after the current batch. With
@@ -1374,8 +1376,14 @@ def run_sweep(conn: 'connection', http_session,
                     stopping = True
                     break
 
-            if delay > 0:
-                time.sleep(delay)
+            # jittered courtesy pause: delay +/- a random amount
+            # so many agents don't fall into lock-step
+            pause = delay
+            if delay_jitter > 0:
+                pause = max(0.0, delay + random.uniform(
+                    -delay_jitter, delay_jitter))
+            if pause > 0:
+                time.sleep(pause)
 
         finish_workload(conn, batch_no)
 
@@ -1416,6 +1424,9 @@ def read_control(conn: 'connection'):
     # consistent across the whole fleet regardless of how each
     # machine's local timezone is set.
     variants = (
+        (f'{base_cols}, abort_check, run_from, run_until, '
+         f'interval_days, log_verbose+0, auto_update_hrs, '
+         f'skip_gaps+0, delay_jitter, CURTIME()', 'jitter'),
         (f'{base_cols}, abort_check, run_from, run_until, '
          f'interval_days, log_verbose+0, auto_update_hrs, '
          f'skip_gaps+0, CURTIME()', 'skipgaps'),
@@ -1470,10 +1481,11 @@ def read_control(conn: 'connection'):
            'log_verbose': None,
            'auto_update_hrs': None,
            'skip_gaps': False,
+           'delay_jitter': None,
            'now': row[-1]}
 
     optional = ('abort_check', 'window', 'interval', 'verbose',
-                'update', 'skipgaps')
+                'update', 'skipgaps', 'jitter')
     if level in optional:
         ctl['abort_check'] = row[8]
     if level in optional[1:]:
@@ -1485,8 +1497,10 @@ def read_control(conn: 'connection'):
         ctl['log_verbose'] = bool(row[12])
     if level in optional[4:]:
         ctl['auto_update_hrs'] = row[13]
-    if level == 'skipgaps':
+    if level in optional[5:]:
         ctl['skip_gaps'] = bool(row[14])
+    if level == 'jitter':
+        ctl['delay_jitter'] = row[15]
 
     ctl['in_window'] = in_time_window(ctl['now'],
                                       ctl['run_from'],
@@ -1796,7 +1810,11 @@ def run_agent(args, conn: 'connection'):
                             if ctl['interval'] is not None
                             else args.interval),
                         skip_gaps=ctl['skip_gaps'],
-                        sweep_start=ctl['updated'])
+                        sweep_start=ctl['updated'],
+                        delay_jitter=(
+                            ctl['delay_jitter']
+                            if ctl['delay_jitter'] is not None
+                            else args.delay_jitter))
 
                     after = read_control(conn)
                     if after is not None and after['go'] \
@@ -2022,6 +2040,17 @@ if __name__ == '__main__':
                         help='seconds to wait between two '
                              'physician downloads '
                              f'(default={DEFAULT_DELAY})')
+    parser.add_argument('--delay-jitter', type=float,
+                        default=DEFAULT_DELAY_JITTER,
+                        metavar='SEC',
+                        help='random +/- jitter (seconds) added '
+                             'to each delay so requests do not '
+                             'fall into lock-step, e.g. 0.5 with '
+                             '--delay 1 makes each pause drift '
+                             'between 0.5 and 1.5 s. In agent '
+                             'mode the delay_jitter control '
+                             f'column wins (default='
+                             f'{DEFAULT_DELAY_JITTER})')
     parser.add_argument('--skip-gaps',
                         action='store_true',
                         help='skip known gaps (CPSO numbers below '
@@ -2084,6 +2113,7 @@ if __name__ == '__main__':
               f"Random     : {USE_RANDOM}\n"
               f"Batch size : {BATCH_SIZE}\n"
               f"Delay      : {args.delay}\n"
+              f"Delay jit. : {args.delay_jitter}\n"
               f"Skip gaps  : {args.skip_gaps}\n"
               f"Quick mode : {args.quick}\n"
               f"======================================")
@@ -2128,6 +2158,7 @@ if __name__ == '__main__':
                   quick=args.quick,
                   check_every=args.abort_check,
                   interval=args.interval,
-                  skip_gaps=args.skip_gaps)
+                  skip_gaps=args.skip_gaps,
+                  delay_jitter=args.delay_jitter)
     curs.close()
     connect_db.close()
