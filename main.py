@@ -21,6 +21,19 @@ from cpso_site import (make_session, fetch_physician_page,
 from knock import knock, knock_config_from_env
 
 
+# The scraped data can contain any Unicode (foreign names, stray
+# control chars like U+0081). Windows' default console/redirect
+# encoding is cp1252, so print()ing such a character crashes with
+# UnicodeEncodeError - which under the SYSTEM task (stdout ->
+# agent.log) dropped the doctor being printed. Force stdout/stderr
+# to UTF-8 and replace anything unencodable so output never fails.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
+
+
 def db_connect(_knock_retries=6, _knock_gap=2.0, **conn_params):
     """mariadb.connect with a port-knock fallback for clinics
     behind a dynamic-IP firewall.
