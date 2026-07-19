@@ -622,13 +622,18 @@ ORDER BY last_seen DESC;
 ```
 
 ```powershell
-# 2. restart the dead ones (no reboot, no re-deploy needed - they
-#    come back on old code and then update themselves)
-schtasks /run /s <MACHINE> /tn "CPSO scrape agent"
+# 2. on each dead machine (remote in; the clinics are on separate
+#    networks, so there is no fleet-wide remote invocation).
+#    No reboot and no re-deploy: it comes back on the old code and
+#    updates itself within auto_update_hrs, and the new code
+#    repairs the task at startup.
+schtasks /run /tn "CPSO scrape agent"
 ```
 
 ```sql
--- 3. push the new code to everyone
+-- 3. ONLY IF auto_update_hrs is 0 - otherwise agents pull on their
+--    own within that many hours and this step is unnecessary:
+--    SELECT control_uno, go_flag, auto_update_hrs FROM MD_scrape_control;
 INSERT INTO MD_scrape_command (host_pattern, command, note)
 VALUES ('%', 'update', 'task self-repair');
 
