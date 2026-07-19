@@ -570,6 +570,42 @@ Notes:
 |---|---|
 | `pip install mariadb` fails | Install MS Visual C++ Redistributable x64, retry |
 | Agent log: `cannot connect` loop | Clinic firewall blocks 3306 to faxcomet.com |
+| Knock appears to work but the DB is still unreachable, on a dual-stack machine | Family mismatch — see below |
+
+### IPv4 / IPv6 and the knock
+
+The knock daemon authorizes the **source address it saw the
+sequence from**. On a dual-stack clinic machine the connector
+usually prefers IPv6, so a knock sent over IPv4 authorizes the v4
+address while the connection arrives from the v6 one — the packet
+is dropped and the agent reports it cannot reach the database at
+all. `knock.py` was hardcoded to `AF_INET`, so this was guaranteed
+on any machine with working IPv6.
+
+The agent now resolves the DB host and knocks **every address it
+might connect from**, logging which ones:
+
+```
+[..] DB unreachable - port-knocking faxcomet.com (tcp [..]) on
+     v6 2001:db8::1, v4 203.0.113.7 to authorize this IP...
+```
+
+If the daemon only handles IPv4 (knockd needs separate `ip6tables`
+rules for v6), pin the traffic instead:
+
+```
+setx CPSO_FORCE_IPV4 1 /M          # machine-wide, or --force-ipv4
+```
+
+That resolves an A record only, knocks it, and pins the connection
+to that same literal so it cannot slip back to v6. Worth doing
+anyway where IPv6 **privacy extensions** are on — Windows rotates
+the host portion of the address by default, so even a successful v6
+knock authorizes an address the machine may stop using.
+
+Note: with `CPSO_FORCE_IPV4` the connection is made to an IP
+literal, which would break TLS certificate hostname verification if
+TLS is ever enabled on this connection.
 | Agents idle though go_flag=1 | Outside run window? Check `SELECT CURTIME();` vs run_from/run_until (DB clock rules) |
 | Every agent stops immediately | Leftover abort row — `DELETE FROM MD_batch_header WHERE host='!!!ABORT_ALL' AND batch_size<0;` |
 | `--abort` waits forever | Dead clients' batches are reaped automatically once they pass `--stale-minutes` (30 min default); use `--force-abort` to clean immediately |

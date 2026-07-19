@@ -1285,6 +1285,211 @@ class TestMisc(unittest.TestCase):
 
 
 # ==============================================================
+#  8a. address family: the knock must match the connection
+# ==============================================================
+
+@contextlib.contextmanager
+def fake_dns(mapping):
+    """socket.getaddrinfo returning a chosen address list."""
+    import socket as _s
+
+    def gai(host, port, family=0, type=0, *a, **kw):
+        rows = mapping.get(host)
+        if rows is None:
+            raise _s.gaierror(f'no such host {host}')
+        return [(f, _s.SOCK_STREAM, 6, '', (addr, port))
+                for f, addr in rows
+                if family in (0, _s.AF_UNSPEC, f)]
+
+    old = main.socket.getaddrinfo
+    main.socket.getaddrinfo = gai
+    try:
+        yield
+    finally:
+        main.socket.getaddrinfo = old
+
+
+@contextlib.contextmanager
+def fake_connect(fail_times=0):
+    """mariadb.connect that fails N times, recording its params."""
+    calls = []
+
+    def connect(**kw):
+        calls.append(kw)
+        if len(calls) <= fail_times:
+            raise db_error('cannot connect', errno=2003)
+        return FakeDb(REFS)
+
+    old = main.mariadb.connect
+    main.mariadb.connect = connect
+    try:
+        yield calls
+    finally:
+        main.mariadb.connect = old
+
+
+@contextlib.contextmanager
+def fake_knock():
+    calls = []
+    old = main.knock
+    main.knock = lambda host, ports, proto='tcp', delay=0.3, \
+        timeout=0.5, family=None: calls.append((host, family))
+    try:
+        yield calls
+    finally:
+        main.knock = old
+
+
+@contextlib.contextmanager
+def force_ipv4(on):
+    old = main.FORCE_IPV4
+    main.FORCE_IPV4 = on
+    try:
+        yield
+    finally:
+        main.FORCE_IPV4 = old
+
+
+DUAL = {'db.example.com': [(main.socket.AF_INET6, '2001:db8::1'),
+                           (main.socket.AF_INET, '203.0.113.7')]}
+
+
+class TestAddressFamily(unittest.TestCase):
+    """The knock daemon authorizes the SOURCE address it saw. A v4
+    knock followed by a v6 connection authorizes one address and
+    connects from another - the whole clinic then looks offline."""
+
+    def test_resolve_orders_and_dedupes(self):
+        dupes = {'h': [(main.socket.AF_INET6, '2001:db8::1'),
+                       (main.socket.AF_INET6, '2001:db8::1'),
+                       (main.socket.AF_INET, '203.0.113.7')]}
+        with fake_dns(dupes):
+            got = main.resolve_targets('h', 3306, force_ipv4=False)
+        self.assertEqual(got, [(main.socket.AF_INET6, '2001:db8::1'),
+                               (main.socket.AF_INET, '203.0.113.7')])
+
+    def test_resolve_ipv4_only_when_forced(self):
+        with fake_dns(DUAL):
+            got = main.resolve_targets('db.example.com', 3306,
+                                       force_ipv4=True)
+        self.assertEqual(got, [(main.socket.AF_INET, '203.0.113.7')])
+
+    def test_unresolvable_returns_empty(self):
+        with fake_dns({}):
+            self.assertEqual(
+                main.resolve_targets('nope', 3306), [])
+
+    def test_knocks_every_family_it_may_connect_from(self):
+        os.environ['CPSO_KNOCK'] = 'tcp:1,2,3'
+        try:
+            with force_ipv4(False), fake_dns(DUAL), \
+                    fake_knock() as knocks, \
+                    fake_connect(fail_times=1), quiet():
+                main.db_connect(_knock_retries=2, _knock_gap=0,
+                                host='db.example.com', port=3306)
+        finally:
+            os.environ.pop('CPSO_KNOCK', None)
+        self.assertEqual(knocks,
+                         [('2001:db8::1', main.socket.AF_INET6),
+                          ('203.0.113.7', main.socket.AF_INET)])
+
+    def test_forced_ipv4_knocks_and_connects_v4_only(self):
+        os.environ['CPSO_KNOCK'] = 'tcp:1,2,3'
+        try:
+            with force_ipv4(True), fake_dns(DUAL), \
+                    fake_knock() as knocks, \
+                    fake_connect(fail_times=1) as conns, quiet():
+                main.db_connect(_knock_retries=2, _knock_gap=0,
+                                host='db.example.com', port=3306)
+        finally:
+            os.environ.pop('CPSO_KNOCK', None)
+        # knocked v4 only...
+        self.assertEqual(knocks,
+                         [('203.0.113.7', main.socket.AF_INET)])
+        # ...and the connection is pinned to that same literal, so
+        # it cannot slip back to v6
+        self.assertTrue(conns)
+        for kw in conns:
+            self.assertEqual(kw['host'], '203.0.113.7')
+
+    def test_not_forced_leaves_the_hostname_alone(self):
+        with force_ipv4(False), fake_dns(DUAL), \
+                fake_connect() as conns, quiet():
+            main.db_connect(host='db.example.com', port=3306)
+        self.assertEqual(conns[0]['host'], 'db.example.com')
+
+    def test_no_knock_configured_still_raises(self):
+        os.environ.pop('CPSO_KNOCK', None)
+        with force_ipv4(False), fake_dns(DUAL), \
+                fake_knock() as knocks, \
+                fake_connect(fail_times=1), quiet():
+            with self.assertRaises(Exception):
+                main.db_connect(host='db.example.com', port=3306)
+        self.assertEqual(knocks, [])
+
+    def test_knock_accepts_a_family(self):
+        # knock.py was hardcoded AF_INET, which is what caused this
+        import inspect
+        import knock as k
+        self.assertIn('family',
+                      inspect.signature(k.knock).parameters)
+
+    def _knock_families(self, proto, family=None):
+        """Families knock() actually opens sockets with (accepting
+        the parameter is not the same as honouring it)."""
+        import knock as k
+        made = []
+
+        class FakeSock:
+            def __init__(self, fam, _type):
+                made.append(fam)
+
+            def settimeout(self, _t):
+                pass
+
+            def connect(self, _addr):
+                raise OSError('filtered')     # expected for a knock
+
+            def sendto(self, _data, _addr):
+                pass
+
+            def close(self):
+                pass
+
+        old_sock, old_sleep = k.socket.socket, k.time.sleep
+        k.socket.socket = lambda fam, typ: FakeSock(fam, typ)
+        k.time.sleep = lambda _s: None
+        try:
+            kw = {} if family is None else {'family': family}
+            k.knock('198.51.100.1', [1, 2], proto, 0, **kw)
+        finally:
+            k.socket.socket, k.time.sleep = old_sock, old_sleep
+        return made
+
+    def test_knock_honours_the_family_tcp(self):
+        got = self._knock_families('tcp', main.socket.AF_INET6)
+        self.assertEqual(got, [main.socket.AF_INET6] * 2)
+
+    def test_knock_honours_the_family_udp(self):
+        got = self._knock_families('udp', main.socket.AF_INET6)
+        self.assertEqual(got, [main.socket.AF_INET6] * 2)
+
+    def test_knock_defaults_to_ipv4(self):
+        # unchanged behaviour for any caller that does not care
+        self.assertEqual(self._knock_families('tcp'),
+                         [main.socket.AF_INET] * 2)
+
+    def test_env_var_parsing(self):
+        for raw, want in (('1', True), ('true', True), ('YES', True),
+                          ('on', True), ('0', False), ('', False),
+                          ('no', False)):
+            with self.subTest(raw=raw):
+                self.assertEqual(
+                    raw.strip().lower() in ('1', 'true', 'yes', 'on'),
+                    want)
+
+
+# ==============================================================
 #  8b. agent.log timestamps
 # ==============================================================
 

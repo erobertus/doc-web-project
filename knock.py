@@ -45,25 +45,33 @@ def knock_config_from_env() -> tuple:
 
 
 def knock(host: str, ports: list, proto='tcp',
-          delay=0.3, timeout=0.5) -> bool:
+          delay=0.3, timeout=0.5, family=socket.AF_INET) -> bool:
     """Send the knock sequence to host. Best-effort: what matters
     is that each packet reaches the firewall, not that anything
     replies, so every socket error is swallowed. Returns False
-    when nothing was sent (no ports)."""
+    when nothing was sent (no ports).
+
+    `family` MUST match the family the database connection will
+    use. The daemon authorizes the SOURCE address it saw the
+    sequence from, so knocking over IPv4 and then connecting over
+    IPv6 (which a dual-stack machine prefers) authorizes one
+    address and connects from another - the connection is dropped
+    and the agent looks like it cannot reach the DB at all. The
+    caller resolves the host and knocks each family it might
+    actually connect over."""
     if not ports:
         return False
 
     for port in ports:
         try:
             if proto == 'udp':
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s = socket.socket(family, socket.SOCK_DGRAM)
                 try:
                     s.sendto(b'', (host, port))
                 finally:
                     s.close()
             else:
-                s = socket.socket(socket.AF_INET,
-                                  socket.SOCK_STREAM)
+                s = socket.socket(family, socket.SOCK_STREAM)
                 s.settimeout(timeout)
                 try:
                     s.connect((host, port))

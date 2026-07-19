@@ -51,6 +51,39 @@ def say(message):
     print(f'[{time.strftime("%Y-%m-%d %H:%M:%S")}] {message}')
 
 
+# --force-ipv4 / CPSO_FORCE_IPV4: pin DB traffic to IPv4. Off by
+# default - the knock now follows whatever family the connection
+# uses, which is the actual fix. Turn this on when the knock daemon
+# only handles IPv4 (knockd's v6 support needs separate ip6tables
+# rules), or when IPv6 privacy extensions rotate the address out
+# from under an authorization.
+FORCE_IPV4 = os.environ.get('CPSO_FORCE_IPV4', '').strip().lower() \
+    in ('1', 'true', 'yes', 'on')
+
+
+def resolve_targets(host, port=3306, force_ipv4=None) -> list:
+    """[(family, address), ...] the DB connection may actually use,
+    in the operating system's own preference order - the same order
+    the connector's getaddrinfo will hand back, so the first entry
+    is what it will normally pick. Deduplicated. Empty when the
+    name does not resolve (caller falls back to the bare host)."""
+    if force_ipv4 is None:
+        force_ipv4 = FORCE_IPV4
+    family = socket.AF_INET if force_ipv4 else socket.AF_UNSPEC
+    try:
+        infos = socket.getaddrinfo(host, port, family,
+                                   socket.SOCK_STREAM)
+    except (socket.gaierror, OSError, UnicodeError):
+        return []
+    seen, targets = set(), []
+    for fam, _, _, _, sockaddr in infos:
+        key = (fam, sockaddr[0])
+        if key not in seen:
+            seen.add(key)
+            targets.append(key)
+    return targets
+
+
 def db_connect(_knock_retries=6, _knock_gap=2.0, **conn_params):
     """mariadb.connect with a port-knock fallback for clinics
     behind a dynamic-IP firewall.
@@ -65,16 +98,36 @@ def db_connect(_knock_retries=6, _knock_gap=2.0, **conn_params):
     agent reconnect loop, the run_agent.bat restart loop) knock
     again on their own schedule. No sequence configured = a plain
     mariadb.connect."""
+    host = conn_params.get('host')
+    port = conn_params.get('port') or 3306
+
+    # with --force-ipv4 the connection is pinned to an A record, so
+    # it cannot pick a v6 address the knock never authorized
+    if FORCE_IPV4 and host:
+        v4 = resolve_targets(host, port, force_ipv4=True)
+        if v4:
+            conn_params = dict(conn_params, host=v4[0][1])
+
     try:
         return mariadb.connect(**conn_params)
     except mariadb.Error:
         ports, proto, delay = knock_config_from_env()
         if not ports:
             raise
-        host = conn_params.get('host')
+        # knock every address this connection might come FROM: the
+        # daemon authorizes the source address it saw, so a v4-only
+        # knock followed by a v6 connection authorizes one address
+        # and connects from another
+        targets = resolve_targets(host, port)
+        if not targets:
+            targets = [(socket.AF_INET, host)]
+        families = ', '.join(
+            f'{"v6" if f == socket.AF_INET6 else "v4"} {a}'
+            for f, a in targets)
         say(f'DB unreachable - port-knocking {host} '
-            f'({proto} {ports}) to authorize this IP...')
-        knock(host, ports, proto, delay)
+            f'({proto} {ports}) on {families} to authorize this IP...')
+        for fam, addr in targets:
+            knock(addr, ports, proto, delay, family=fam)
         last = None
         for attempt in range(_knock_retries):
             try:
@@ -2141,6 +2194,14 @@ if __name__ == '__main__':
                         metavar='SEC',
                         help='seconds between individual knocks '
                              '(default 0.3)')
+    parser.add_argument('--force-ipv4', action='store_true',
+                        default=None,
+                        help='pin database traffic to IPv4. By '
+                             'default the knock follows whatever '
+                             'family the connection uses; force '
+                             'this when the knock daemon only '
+                             'handles IPv4 (CPSO_FORCE_IPV4=1 '
+                             'sets it machine-wide)')
     parser.add_argument('-v', '--verbose-log',
                         action='store_true',
                         help='also write each doctor\'s summary '
@@ -2234,6 +2295,10 @@ if __name__ == '__main__':
         os.environ['CPSO_KNOCK'] = args.knock
     if args.knock_delay is not None:
         os.environ['CPSO_KNOCK_DELAY'] = str(args.knock_delay)
+    # --force-ipv4 overrides the env default; db_connect and the
+    # logger's own connection both read this module global
+    if args.force_ipv4:
+        FORCE_IPV4 = True
 
     # central fleet log (best-effort; falls back to console)
     DB_LOG.init(user=args.db_user,
