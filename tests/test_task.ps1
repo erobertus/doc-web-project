@@ -79,6 +79,28 @@ Check (Test-HasRepeat $rep)               'a repeating trigger is detected'
 Check (Test-HasRepeat @($boot, $rep))     'detected when mixed with a boot trigger'
 Check ($rep.Repetition.Interval -eq 'PT10M') 'repetition interval is PT10M'
 
+'=== Set-ScheduledTask: -Settings and -Trigger must stay apart ==='
+# Passing both to ONE call throws "Type mismatch" against a live
+# SYSTEM task on Windows 11, while the same two changes applied one
+# at a time both succeed. Caught in production on 2026-07-19.
+$src = Get-Content (Join-Path (Split-Path -Parent $here) 'agent_task.ps1') -Raw
+# drop comment lines first (the comment explaining this very rule
+# names all three tokens on one line), then join backtick
+# continuations so a call split across lines is still seen whole
+$code = ($src -split '\r?\n' |
+         Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n"
+$flat = $code -replace '`\r?\n\s*', ' '
+$combined = @($flat -split '\r?\n' | Where-Object {
+    $_ -match 'Set-ScheduledTask' -and
+    $_ -match '-Settings' -and $_ -match '-Trigger' })
+Check ($combined.Count -eq 0) 'no Set-ScheduledTask passes -Settings and -Trigger together'
+Check ($flat -match 'Set-ScheduledTask[^\r\n]*-Settings') 'settings are applied'
+Check ($flat -match 'Set-ScheduledTask[^\r\n]*-Trigger')  'triggers are applied'
+
+'=== the repair verifies by re-reading, not by absence of an error ==='
+Check ($src -match "verified ExecutionTimeLimit") 'success line reports a verified state'
+Check ($src -match "did not stick")               'mismatch after writing is reported as WARN'
+
 ''
 if ($script:fail) { "RESULT: $script:fail CHECK(S) FAILED"; exit 1 }
 'RESULT: all checks passed'

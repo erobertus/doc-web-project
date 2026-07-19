@@ -166,16 +166,25 @@ function Invoke-Repair {
     $s = $task.Settings
     $changes = @(Repair-Settings -s $s)
 
-    # --- liveness net: a repeating trigger ---
-    $triggers = $null
+    # --- apply the settings ---
+    # -Settings and -Trigger MUST go in separate Set-ScheduledTask
+    # calls. Passing both to one call throws "Type mismatch" (seen
+    # on Windows 11 against a live SYSTEM task); the same two
+    # changes applied one at a time both succeed.
+    if ($changes.Count -gt 0) {
+        Set-ScheduledTask -TaskName $TaskName -Settings $s | Out-Null
+    }
+
+    # --- liveness net: a repeating trigger, applied separately ---
     if (-not (Test-HasRepeat $task.Triggers)) {
         try {
             $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).Date
             $repeat.Repetition = New-Repetition
-            $triggers = @($task.Triggers) + $repeat
+            Set-ScheduledTask -TaskName $TaskName `
+                -Trigger (@($task.Triggers) + $repeat) | Out-Null
             $changes += "added repeat trigger $REPEAT"
         } catch {
-            # not fatal - the time-limit fix above is the real one
+            # not fatal - the time limit above is the real killer
             Write-Output "WARN could not add repeat trigger: $($_.Exception.Message)"
         }
     }
@@ -184,14 +193,23 @@ function Invoke-Repair {
         return                      # already correct, stay silent
     }
 
-    if ($null -ne $triggers) {
-        Set-ScheduledTask -TaskName $TaskName -Settings $s `
-            -Trigger $triggers | Out-Null
-    } else {
-        Set-ScheduledTask -TaskName $TaskName -Settings $s | Out-Null
+    # --- confirm by RE-READING the task ---
+    # Never report success just because nothing threw: a CIM call
+    # can fail while its work has already committed, and can commit
+    # while its output object fails to materialise. What the task
+    # store actually says afterwards is the only thing worth
+    # logging to 20 machines.
+    $now = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $limit = if ($null -eq $now) { '<unreadable>' }
+             else { $now.Settings.ExecutionTimeLimit }
+    if ($limit -ne 'PT0S') {
+        Write-Output ("WARN task repair did not stick: " +
+                      "ExecutionTimeLimit is $limit (wanted PT0S)")
+        return
     }
 
-    Write-Output ("task settings repaired: " + ($changes -join '; '))
+    Write-Output ("task settings repaired: " + ($changes -join '; ') +
+                  " [verified ExecutionTimeLimit=PT0S]")
 }
 
 
