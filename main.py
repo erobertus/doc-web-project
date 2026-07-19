@@ -34,6 +34,23 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 
+def say(message):
+    """Print an OPERATIONAL line with a local timestamp.
+
+    agent.log is the only record of what an unattended machine did,
+    and 'Agent: reconnected.' on its own says nothing about when.
+    Anything describing the agent's own state - startup, connection
+    loss and recovery, schedule changes, commands, exits - goes
+    through here.
+
+    The per-doctor scrape lines deliberately do NOT: they are the
+    bulk of the log, already carry a batch id, and leaving them
+    plain is what makes the stamped lines stand out when scanning.
+    Local machine time (the DB clock is quoted in the message where
+    it matters)."""
+    print(f'[{time.strftime("%Y-%m-%d %H:%M:%S")}] {message}')
+
+
 def db_connect(_knock_retries=6, _knock_gap=2.0, **conn_params):
     """mariadb.connect with a port-knock fallback for clinics
     behind a dynamic-IP firewall.
@@ -55,16 +72,16 @@ def db_connect(_knock_retries=6, _knock_gap=2.0, **conn_params):
         if not ports:
             raise
         host = conn_params.get('host')
-        print(f'DB unreachable - port-knocking {host} '
-              f'({proto} {ports}) to authorize this IP...')
+        say(f'DB unreachable - port-knocking {host} '
+            f'({proto} {ports}) to authorize this IP...')
         knock(host, ports, proto, delay)
         last = None
         for attempt in range(_knock_retries):
             try:
                 conn = mariadb.connect(**conn_params)
                 if attempt > 0:
-                    print(f'DB reachable after knock '
-                          f'(attempt {attempt + 1}).')
+                    say(f'DB reachable after knock '
+                        f'(attempt {attempt + 1}).')
                 return conn
             except mariadb.Error as e:
                 last = e
@@ -1848,8 +1865,8 @@ def run_agent(args, conn: 'connection'):
     waiting_logged = False
     last_auto_update = time.time()
 
-    print(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
-          f'every {args.poll_interval} sec. Ctrl-C to stop.')
+    say(f'Agent mode: polling {CONTROL_TBL} on {args.db_host} '
+        f'every {args.poll_interval} sec. Ctrl-C to stop.')
     # record the effective config so each machine's settings are
     # visible centrally (run_agent.bat exports the log-rotation
     # values into the environment, so os.environ reflects what is
@@ -1871,7 +1888,7 @@ def run_agent(args, conn: 'connection'):
     #            WHERE message LIKE 'task settings%';
     task_fix = ensure_task_settings()
     if task_fix:
-        print(task_fix)
+        say(task_fix)
         DB_LOG.log('WARN' if task_fix.startswith('WARN') else 'INFO',
                    task_fix)
 
@@ -1879,9 +1896,9 @@ def run_agent(args, conn: 'connection'):
         """git pull; restart (exit 43) only if code changed."""
         ok, changed, out = git_pull()
         DB_LOG.log('INFO', f'{reason}: {out[:200]}')
-        print(f'{reason}: {out[:200]}')
+        say(f'{reason}: {out[:200]}')
         if changed:
-            print('Updated - restarting to load new code.')
+            say('Updated - restarting to load new code.')
             sys.exit(AGENT_UPDATE_EXIT)
 
     while True:
@@ -1890,8 +1907,8 @@ def run_agent(args, conn: 'connection'):
             # by host pattern - checked before anything else
             action = process_commands(conn, DB_LOG.host)
             if action == 'destruct':
-                print('Central DESTRUCT command - uninstalling '
-                      'this agent.')
+                say('Central DESTRUCT command - uninstalling '
+                    'this agent.')
                 DB_LOG.log('WARN', 'destruct command received - '
                            'uninstalling')
                 sys.exit(AGENT_DESTRUCT_EXIT)
@@ -1916,8 +1933,8 @@ def run_agent(args, conn: 'connection'):
                 completed_marker = None
                 completed_time = 0.0
                 if not waiting_logged:
-                    print('Agent: idle - no active schedule '
-                          'matches this host right now.')
+                    say('Agent: idle - no active schedule '
+                        'matches this host right now.')
                     waiting_logged = True
                 hb_state = 'idle'
             else:
@@ -1931,9 +1948,9 @@ def run_agent(args, conn: 'connection'):
                         ctl['log_verbose']
                         if ctl['log_verbose'] is not None
                         else args.verbose_log)
-                    print(f"Agent: go! quick={ctl['quick']} "
-                          f"range={ctl['cpso_start']}-"
-                          f"{ctl['cpso_stop']} "
+                    say(f"Agent: go! quick={ctl['quick']} "
+                        f"range={ctl['cpso_start']}-"
+                        f"{ctl['cpso_stop']} "
                           f"batch={ctl['batch_size']} "
                           f"delay={ctl['delay']} "
                           f"random={ctl['random']}\n"
@@ -1980,11 +1997,11 @@ def run_agent(args, conn: 'connection'):
                         # idle period
                         completed_marker = after['updated']
                         completed_time = time.time()
-                        print(f'Agent: pool exhausted '
-                              f'({n} processed). Idle until the '
-                              f'schedule changes or '
-                              f'{AGENT_RESWEEP_SECS // 3600} h '
-                              f'passes.')
+                        say(f'Agent: pool exhausted '
+                            f'({n} processed). Idle until the '
+                            f'schedule changes or '
+                            f'{AGENT_RESWEEP_SECS // 3600} h '
+                            f'passes.')
                     else:
                         # stopped by schedule/window ending:
                         # forget the marker so it resumes when a
@@ -1997,17 +2014,17 @@ def run_agent(args, conn: 'connection'):
             # hand control back to run_agent.bat so it can rotate
             # the (Windows-locked) local log, then restart us
             if agent_log_oversized():
-                print('Local log reached its size cap - exiting '
-                      'for rotation; run_agent.bat restarts '
-                      'immediately.')
+                say('Local log reached its size cap - exiting '
+                    'for rotation; run_agent.bat restarts '
+                    'immediately.')
                 DB_LOG.log('INFO', 'local log rotation restart')
                 sys.exit(AGENT_ROTATE_EXIT)
 
             time.sleep(args.poll_interval)
 
         except mariadb.Error as e:
-            print(f'Agent: database error: {e}. '
-                  f'Reconnecting in 60 sec...')
+            say(f'Agent: database error: {e}. '
+                f'Reconnecting in 60 sec...')
             DB_LOG.log('WARN',
                        f'agent database error, '
                        f'reconnecting: {e}')
@@ -2025,12 +2042,12 @@ def run_agent(args, conn: 'connection'):
                         port=args.db_port,
                         database=args.db_name,
                         compress=True)
-                    print('Agent: reconnected.')
+                    say('Agent: reconnected.')
                     DB_LOG.log('INFO', 'agent reconnected')
                     break
                 except mariadb.Error as e2:
-                    print(f'Agent: reconnect failed: {e2}; '
-                          f'retrying in 60 sec...')
+                    say(f'Agent: reconnect failed: {e2}; '
+                        f'retrying in 60 sec...')
                     time.sleep(60)
 
 

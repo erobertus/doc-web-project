@@ -1285,6 +1285,74 @@ class TestMisc(unittest.TestCase):
 
 
 # ==============================================================
+#  8b. agent.log timestamps
+# ==============================================================
+
+class TestSay(unittest.TestCase):
+    """agent.log is the only record of what an unattended machine
+    did; 'Agent: reconnected.' with no time says nothing."""
+
+    STAMP = r'^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] '
+
+    def test_stamps_the_line(self):
+        with quiet() as out:
+            main.say('Agent: reconnected.')
+        self.assertRegex(out.getvalue(), self.STAMP)
+        self.assertIn('Agent: reconnected.', out.getvalue())
+
+    def test_one_line_per_call(self):
+        with quiet() as out:
+            main.say('a')
+            main.say('b')
+        lines = out.getvalue().splitlines()
+        self.assertEqual(len(lines), 2)
+        for line in lines:
+            self.assertRegex(line, self.STAMP)
+
+    def test_scrape_lines_stay_unstamped(self):
+        # the per-doctor bulk keeps using plain print, which is what
+        # makes the stamped operational lines stand out
+        db = FakeDb(REFS)
+        with served(72500), quiet() as out:
+            main.process_record(db, 72500, batch_id=1)
+        doctor = [l for l in out.getvalue().splitlines()
+                  if 'CPSO: 72500' in l]
+        self.assertTrue(doctor)
+        for line in doctor:
+            self.assertNotRegex(line, self.STAMP)
+
+    def test_operational_lines_all_go_through_say(self):
+        # a bare print() of an agent-state line would land in
+        # agent.log with no timestamp - the bug this fixes
+        src = open(os.path.join(ROOT, 'main.py'),
+                   encoding='utf-8').read()
+        markers = ('Agent mode:', 'Agent: idle', 'Agent: go!',
+                   'Agent: reconnected', 'Agent: reconnect failed',
+                   'Agent: database error', 'Agent: pool exhausted',
+                   'DB unreachable', 'DB reachable after knock',
+                   'Local log reached its size cap',
+                   'Central DESTRUCT command',
+                   'Updated - restarting')
+        offenders = []
+        for line in src.splitlines():
+            for m in markers:
+                if m in line and 'print(' in line:
+                    offenders.append(line.strip()[:60])
+        self.assertEqual(offenders, [],
+                         'operational line(s) still using print()')
+
+    def test_every_marker_is_actually_present(self):
+        # guards the test above from silently passing if a message
+        # gets reworded
+        src = open(os.path.join(ROOT, 'main.py'),
+                   encoding='utf-8').read()
+        for m in ('Agent: reconnected', 'Agent: idle',
+                  'DB unreachable', 'Agent mode:'):
+            with self.subTest(marker=m):
+                self.assertIn(m, src)
+
+
+# ==============================================================
 #  9. scheduled-task self-repair
 # ==============================================================
 

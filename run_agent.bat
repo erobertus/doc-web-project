@@ -25,25 +25,25 @@ set /a MAXBYTES=%CPSO_LOG_MAX_MB% * 1048576
 
 :loop
 call :rotate
-echo ===== agent (re)start %date% %time% =====>> "%CPSO_AGENT_LOG%"
+echo [%date% %time%] ===== agent (re)start =====>> "%CPSO_AGENT_LOG%"
 "%PYEXE%" -u main.py --agent >> "%CPSO_AGENT_LOG%" 2>&1
 set "EC=%ERRORLEVEL%"
 rem code 42 = local-log rotation; 43 = git-updated; both restart
 rem now (rotation happens at loop top). 44 = self-destruct.
 if "%EC%"=="42" (
-    echo ===== rotating agent.log, restarting =====>> "%CPSO_AGENT_LOG%"
+    echo [%date% %time%] ===== rotating agent.log, restarting =====>> "%CPSO_AGENT_LOG%"
     goto loop
 )
 if "%EC%"=="43" (
-    echo ===== updated, restarting =====>> "%CPSO_AGENT_LOG%"
+    echo [%date% %time%] ===== updated, restarting =====>> "%CPSO_AGENT_LOG%"
     goto loop
 )
 if "%EC%"=="44" (
-    echo ===== self-destruct - uninstalling this agent =====>> "%CPSO_AGENT_LOG%"
+    echo [%date% %time%] ===== self-destruct - uninstalling this agent =====>> "%CPSO_AGENT_LOG%"
     start "" /min "%~dp0deploy_agent.bat" remove
     goto :eof
 )
-echo Agent exited with code %EC%. Restarting in 60 seconds...>> "%CPSO_AGENT_LOG%"
+echo [%date% %time%] Agent exited with code %EC%. Restarting in 60 seconds...>> "%CPSO_AGENT_LOG%"
 ping -n 61 127.0.0.1 >nul
 goto loop
 
