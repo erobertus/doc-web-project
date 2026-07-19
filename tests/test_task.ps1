@@ -103,6 +103,12 @@ Check ($flat -match 'Set-ScheduledTask[^\r\n]*-Trigger')  'triggers are applied'
 # "Type mismatch". Seen in production 2026-07-19.
 Check ($flat -notmatch '\@\(\$task\.Triggers\)\s*\+') 'does not append to $task.Triggers'
 Check ($flat -match '\$existing\[0\]\.Repetition') 'attaches repetition to the existing trigger'
+# -Register hit the same wall: @($atBoot, $repeat) mixes a Boot and
+# a Time trigger and throws. One boot trigger carrying the
+# repetition works, and matches what -Repair leaves behind.
+Check ($flat -notmatch '-Trigger\s*@\(') 'never passes a multi-type trigger array'
+Check ($flat -match 'New-ScheduledTaskTrigger -AtStartup[\s\S]{0,120}\$trigger\.Repetition') `
+      'registers one boot trigger carrying the repetition'
 
 '=== the repair verifies by re-reading, not by absence of an error ==='
 Check ($src -match "verified ExecutionTimeLimit") 'success line reports a verified state'

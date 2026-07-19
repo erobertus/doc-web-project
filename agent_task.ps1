@@ -86,18 +86,36 @@ function Invoke-Register {
     $action = New-ScheduledTaskAction -Execute $Command `
         -WorkingDirectory $work
 
-    # at boot, plus a repeating liveness trigger so the agent comes
-    # back within $RepeatMinutes no matter what stopped it
-    $atBoot = New-ScheduledTaskTrigger -AtStartup
-    $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).Date
-    $repeat.Repetition = New-Repetition
+    # ONE trigger: at boot, carrying the repetition. Never pass an
+    # array mixing trigger types - @($bootTrigger, $timeTrigger)
+    # throws "Type mismatch" here just as it does in -Repair. A boot
+    # trigger holds a repetition perfectly well, so the agent starts
+    # at boot and is re-launched every $REPEAT thereafter; with
+    # IgnoreNew that relaunch is a no-op while it is alive, and the
+    # liveness net when it is not. This is the same shape -Repair
+    # produces, so a registered and a repaired task end up identical.
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $trigger.Repetition = New-Repetition
 
     Register-ScheduledTask -TaskName $TaskName -Force `
-        -Action $action -Trigger @($atBoot, $repeat) `
+        -Action $action -Trigger $trigger `
         -Settings (Get-WantedSettings) `
         -User 'SYSTEM' -RunLevel Highest | Out-Null
 
-    Write-Output "registered task '$TaskName' (no time limit, repeat $REPEAT)"
+    # confirm from the task store rather than from "nothing threw"
+    $now = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($null -eq $now) {
+        Write-Error "task '$TaskName' not found after registering"
+    }
+    $limit = $now.Settings.ExecutionTimeLimit
+    $repeat = if (Test-HasRepeat $now.Triggers) { 'yes' } else { 'no' }
+    if ($limit -ne 'PT0S') {
+        Write-Error ("registered but ExecutionTimeLimit is $limit " +
+                     "(wanted PT0S)")
+    }
+
+    Write-Output ("registered task '$TaskName' " +
+                  "[verified ExecutionTimeLimit=$limit repeat=$repeat]")
 }
 
 
