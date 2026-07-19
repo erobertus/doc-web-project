@@ -590,18 +590,31 @@ might connect from**, logging which ones:
      v6 2001:db8::1, v4 203.0.113.7 to authorize this IP...
 ```
 
-If the daemon only handles IPv4 (knockd needs separate `ip6tables`
-rules for v6), pin the traffic instead:
+**Any machine with a knock sequence configured defaults to IPv4
+only** — it resolves an A record, knocks it, and pins the
+connection to that same literal so it cannot slip back to v6.
+Knocking needs an address that is both authorizable and stable:
+knockd only handles v6 with separate `ip6tables` rules, and
+Windows' IPv6 **privacy extensions** rotate the host portion of the
+address by default, so an authorization goes stale under a machine
+that still thinks it has "the same" address.
+
+A machine with no knock sequence (the server, a dev box) keeps
+ordinary dual-stack behaviour. Override either way:
 
 ```
-setx CPSO_FORCE_IPV4 1 /M          # machine-wide, or --force-ipv4
+setx CPSO_FORCE_IPV4 0 /M     # opt a knocking machine back into v6
+setx CPSO_FORCE_IPV4 1 /M     # force it without knocking
 ```
 
-That resolves an A record only, knocks it, and pins the connection
-to that same literal so it cannot slip back to v6. Worth doing
-anyway where IPv6 **privacy extensions** are on — Windows rotates
-the host portion of the address by default, so even a successful v6
-knock authorizes an address the machine may stop using.
+`--force-ipv4` does the same for a one-off run. The effective mode
+is in every agent's startup line, so it can be confirmed centrally:
+
+```sql
+SELECT host, message FROM MD_scrape_log
+WHERE message LIKE 'agent started%' ORDER BY log_time DESC;
+-- ... knock tcp x5, ip v4-only, ...
+```
 
 Note: with `CPSO_FORCE_IPV4` the connection is made to an IP
 literal, which would break TLS certificate hostname verification if

@@ -1479,14 +1479,48 @@ class TestAddressFamily(unittest.TestCase):
         self.assertEqual(self._knock_families('tcp'),
                          [main.socket.AF_INET] * 2)
 
-    def test_env_var_parsing(self):
-        for raw, want in (('1', True), ('true', True), ('YES', True),
-                          ('on', True), ('0', False), ('', False),
-                          ('no', False)):
+    def _resolved(self, force_env, knock_env):
+        old = (os.environ.get('CPSO_FORCE_IPV4'),
+               os.environ.get('CPSO_KNOCK'))
+        for key, val in (('CPSO_FORCE_IPV4', force_env),
+                         ('CPSO_KNOCK', knock_env)):
+            if val is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = val
+        try:
+            return main._resolve_force_ipv4()
+        finally:
+            for key, val in zip(('CPSO_FORCE_IPV4', 'CPSO_KNOCK'),
+                                old):
+                if val is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = val
+
+    def test_explicit_env_wins(self):
+        for raw in ('1', 'true', 'YES', 'on'):
             with self.subTest(raw=raw):
-                self.assertEqual(
-                    raw.strip().lower() in ('1', 'true', 'yes', 'on'),
-                    want)
+                self.assertTrue(self._resolved(raw, None))
+        for raw in ('0', 'false', 'NO', 'off'):
+            with self.subTest(raw=raw):
+                # explicit opt-out beats the knocking default
+                self.assertFalse(self._resolved(raw, 'tcp:1,2,3'))
+
+    def test_defaults_on_when_knocking(self):
+        # knocking needs an authorizable, stable address: knockd
+        # needs separate rules for v6 and privacy extensions rotate
+        # v6 addresses out from under an authorization
+        self.assertTrue(self._resolved(None, 'tcp:1,2,3'))
+
+    def test_defaults_off_without_knocking(self):
+        # a machine that does not knock keeps ordinary dual-stack
+        self.assertFalse(self._resolved(None, None))
+        self.assertFalse(self._resolved(None, ''))
+
+    def test_unparseable_env_falls_back_to_the_default(self):
+        self.assertTrue(self._resolved('maybe', 'tcp:1,2,3'))
+        self.assertFalse(self._resolved('maybe', None))
 
 
 # ==============================================================

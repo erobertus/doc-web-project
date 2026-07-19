@@ -51,14 +51,30 @@ def say(message):
     print(f'[{time.strftime("%Y-%m-%d %H:%M:%S")}] {message}')
 
 
-# --force-ipv4 / CPSO_FORCE_IPV4: pin DB traffic to IPv4. Off by
-# default - the knock now follows whatever family the connection
-# uses, which is the actual fix. Turn this on when the knock daemon
-# only handles IPv4 (knockd's v6 support needs separate ip6tables
-# rules), or when IPv6 privacy extensions rotate the address out
-# from under an authorization.
-FORCE_IPV4 = os.environ.get('CPSO_FORCE_IPV4', '').strip().lower() \
-    in ('1', 'true', 'yes', 'on')
+def _resolve_force_ipv4() -> bool:
+    """Whether to pin database traffic to IPv4.
+
+    CPSO_FORCE_IPV4 / --force-ipv4 decide it explicitly. With
+    neither set the default is ON WHENEVER A KNOCK SEQUENCE IS
+    CONFIGURED, because knocking needs an address that is both
+    authorizable and stable: knockd only handles IPv6 with separate
+    ip6tables rules, and Windows' IPv6 privacy extensions rotate
+    the host portion of the address by default - so an
+    authorization can go stale under a machine that is still using
+    'the same' address. A machine with no knock sequence (the
+    server, a dev box) keeps ordinary dual-stack behaviour.
+
+    Set CPSO_FORCE_IPV4=0 to opt a knocking machine back out."""
+    raw = os.environ.get('CPSO_FORCE_IPV4', '').strip().lower()
+    if raw in ('1', 'true', 'yes', 'on'):
+        return True
+    if raw in ('0', 'false', 'no', 'off'):
+        return False
+    ports, _, _ = knock_config_from_env()
+    return bool(ports)
+
+
+FORCE_IPV4 = _resolve_force_ipv4()
 
 
 def resolve_targets(host, port=3306, force_ipv4=None) -> list:
@@ -1932,6 +1948,7 @@ def run_agent(args, conn: 'connection'):
     DB_LOG.log('INFO',
                f'agent started (version {DB_LOG.version}, '
                f'poll {args.poll_interval}s, knock {knock_desc}, '
+               f'ip {"v4-only" if FORCE_IPV4 else "dual-stack"}, '
                f'log cap {log_cap}MB x{log_keep})')
 
     # self-heal the scheduled task (see ensure_task_settings). Logged
@@ -2295,8 +2312,10 @@ if __name__ == '__main__':
         os.environ['CPSO_KNOCK'] = args.knock
     if args.knock_delay is not None:
         os.environ['CPSO_KNOCK_DELAY'] = str(args.knock_delay)
-    # --force-ipv4 overrides the env default; db_connect and the
-    # logger's own connection both read this module global
+    # re-evaluate now that --knock may have populated the env, then
+    # let --force-ipv4 override. db_connect and the logger's own
+    # connection both read this module global.
+    FORCE_IPV4 = _resolve_force_ipv4()
     if args.force_ipv4:
         FORCE_IPV4 = True
 
