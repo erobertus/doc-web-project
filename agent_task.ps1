@@ -175,14 +175,29 @@ function Invoke-Repair {
         Set-ScheduledTask -TaskName $TaskName -Settings $s | Out-Null
     }
 
-    # --- liveness net: a repeating trigger, applied separately ---
+    # --- liveness net: a repetition, applied separately ---
+    # Attach it to the trigger ALREADY on the task rather than
+    # appending a new one. $task.Triggers is a strongly typed array
+    # (MSFT_TaskBootTrigger[] when a task only has a boot trigger),
+    # and @($arr) does not retype it - so appending a differently
+    # typed trigger throws "Type mismatch". A boot trigger carries
+    # a repetition perfectly well: the task relaunches every
+    # $REPEAT after boot, which is the liveness net we want.
     if (-not (Test-HasRepeat $task.Triggers)) {
         try {
-            $repeat = New-ScheduledTaskTrigger -Once -At (Get-Date).Date
-            $repeat.Repetition = New-Repetition
-            Set-ScheduledTask -TaskName $TaskName `
-                -Trigger (@($task.Triggers) + $repeat) | Out-Null
-            $changes += "added repeat trigger $REPEAT"
+            $existing = @($task.Triggers)
+            if ($existing.Count -gt 0) {
+                $existing[0].Repetition = New-Repetition
+                Set-ScheduledTask -TaskName $TaskName `
+                    -Trigger $existing | Out-Null
+                $changes += "repeat $REPEAT on existing trigger"
+            } else {
+                $fresh = New-ScheduledTaskTrigger -Once -At (Get-Date).Date
+                $fresh.Repetition = New-Repetition
+                Set-ScheduledTask -TaskName $TaskName `
+                    -Trigger $fresh | Out-Null
+                $changes += "added repeat trigger $REPEAT"
+            }
         } catch {
             # not fatal - the time limit above is the real killer
             Write-Output "WARN could not add repeat trigger: $($_.Exception.Message)"
@@ -208,8 +223,12 @@ function Invoke-Repair {
         return
     }
 
+    # report the repeat state as observed, not as attempted: it is
+    # the secondary net, so a miss is worth knowing but not a WARN
+    $repeat = if ($null -ne $now -and (Test-HasRepeat $now.Triggers))
+              { 'yes' } else { 'no' }
     Write-Output ("task settings repaired: " + ($changes -join '; ') +
-                  " [verified ExecutionTimeLimit=PT0S]")
+                  " [verified ExecutionTimeLimit=PT0S repeat=$repeat]")
 }
 
 

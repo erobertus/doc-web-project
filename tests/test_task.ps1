@@ -97,6 +97,13 @@ Check ($combined.Count -eq 0) 'no Set-ScheduledTask passes -Settings and -Trigge
 Check ($flat -match 'Set-ScheduledTask[^\r\n]*-Settings') 'settings are applied'
 Check ($flat -match 'Set-ScheduledTask[^\r\n]*-Trigger')  'triggers are applied'
 
+'=== triggers: no appending to the existing typed array ==='
+# $task.Triggers is MSFT_TaskBootTrigger[] on a boot-only task and
+# @() does not retype it, so appending a Time trigger throws
+# "Type mismatch". Seen in production 2026-07-19.
+Check ($flat -notmatch '\@\(\$task\.Triggers\)\s*\+') 'does not append to $task.Triggers'
+Check ($flat -match '\$existing\[0\]\.Repetition') 'attaches repetition to the existing trigger'
+
 '=== the repair verifies by re-reading, not by absence of an error ==='
 Check ($src -match "verified ExecutionTimeLimit") 'success line reports a verified state'
 Check ($src -match "did not stick")               'mismatch after writing is reported as WARN'
