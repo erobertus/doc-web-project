@@ -120,6 +120,68 @@ ALTER TABLE MD_scrape_control
 -- wins), control_uno DESC as tiebreak. No match = idle. Judged by
 -- the DATABASE clock.
 
+-- document every control column IN the schema, so the table is
+-- self-explanatory in any client. Comments only - the definitions
+-- below are byte-for-byte the current ones, nothing else changes.
+ALTER TABLE `MD_scrape_control`
+  MODIFY COLUMN `control_uno` INT(11) NOT NULL AUTO_INCREMENT
+    COMMENT 'PK, and the tie-breaker: when several schedules share a priority the HIGHEST control_uno wins. Pre-scheduling agents ignore the pattern columns and read ONLY the newest row, so upgrade the whole fleet BEFORE adding schedule rows.',
+  MODIFY COLUMN `go_flag` BIT(1) NOT NULL DEFAULT b'0'
+    COMMENT 'Enables THIS schedule row: 1 = live, 0 = retired. Every enabled row is a live schedule. Set every row to 0 to stop the fleet; agents notice within abort_check doctors.',
+  MODIFY COLUMN `agent_pattern`
+    VARCHAR(128) COLLATE 'latin1_swedish_ci' NOT NULL DEFAULT '.*'
+    COMMENT 'WHICH AGENTS this schedule covers. RLIKE regex matched against the agent host name (CPSO_AGENT_NAME when set, else the machine name). Default .* = every agent. Prefer unanchored patterns such as ^KNST- : where CPSO_AGENT_NAME is unset the host can carry a trailing @ origin suffix, which breaks a $ anchor.',
+  MODIFY COLUMN `dow_pattern`
+    VARCHAR(64) COLLATE 'latin1_swedish_ci' NOT NULL DEFAULT '.*'
+    COMMENT 'WHICH DAYS this schedule covers. RLIKE regex matched against the 3-letter weekday from the DATABASE clock: Mon Tue Wed Thu Fri Sat Sun. Default .* = every day. Workdays: Mon|Tue|Wed|Thu|Fri',
+  MODIFY COLUMN `priority` INT(11) NOT NULL DEFAULT 100
+    COMMENT 'Conflict resolution when several schedules match the same agent: LOWEST number wins. Keep general rules at 100 and give overrides a lower number.',
+  MODIFY COLUMN `quick_mode` BIT(1) NOT NULL DEFAULT b'0'
+    COMMENT '0 = full detail-page scrape. 1 = quick refresh via the JSON search API: name, former name, status and the DEFAULT address/phone/fax only, about 1 KB instead of 300 KB per doctor. Quick mode escalates to a full scrape on its own for doctors not yet in the DB and for active-to-inactive transitions.',
+  MODIFY COLUMN `cpso_start` INT(11) NULL DEFAULT 10000
+    COMMENT 'Low bound (inclusive) of the CPSO number range this schedule sweeps.',
+  MODIFY COLUMN `cpso_stop` INT(11) NULL DEFAULT 200000
+    COMMENT 'High bound (inclusive) of the CPSO number range this schedule sweeps.',
+  MODIFY COLUMN `batch_size` INT(11) NULL DEFAULT 50
+    COMMENT 'How many CPSO numbers an agent claims per batch. Smaller = finer progress and a faster reaction to stop; larger = less coordination overhead.',
+  MODIFY COLUMN `delay_sec` FLOAT NULL DEFAULT 1
+    COMMENT 'Courtesy pause in seconds between doctors. See delay_jitter.',
+  MODIFY COLUMN `use_random` BIT(1) NULL DEFAULT b'1'
+    COMMENT '1 = walk the range in random order, which spreads several agents across it. 0 = sequential.',
+  MODIFY COLUMN `abort_check` INT(11) NULL DEFAULT 0
+    COMMENT 'How often, in doctors, an agent re-checks for an abort request or a control change WITHIN a batch. 0 = only between batches. Lower = stops sooner, more control-table reads.',
+  MODIFY COLUMN `run_from` TIME NULL DEFAULT NULL
+    COMMENT 'Daily window START, judged by the DATABASE clock, never the agent clock. See run_until.',
+  MODIFY COLUMN `run_until` TIME NULL DEFAULT NULL
+    COMMENT 'Daily window END, DB clock. run_from = run_until means 24 hours. run_from < run_until is a same-day window. run_from > run_until is an overnight window, e.g. 19:00 to 06:00.',
+  MODIFY COLUMN `interval_days` INT(11) NULL DEFAULT 20
+    COMMENT 'Freshness window: skip numbers already scraped within this many days. 0 = campaign mode, i.e. sweep each number once per campaign using this row updated timestamp as the shared fleet epoch. Touch the row to restart a campaign from scratch.',
+  MODIFY COLUMN `log_verbose` BIT(1) NOT NULL DEFAULT b'0'
+    COMMENT '1 = also write a per-doctor DEBUG line into MD_scrape_log. Noisy; for troubleshooting, not for normal running.',
+  MODIFY COLUMN `auto_update_hrs` INT(11) NULL DEFAULT 0
+    COMMENT 'Self-update cadence in hours (git pull, then restart). 0 = off. Read FLEET-GLOBALLY as MAX over all enabled rows, independently of any schedule, so an agent with no active schedule still picks up a new version.',
+  MODIFY COLUMN `skip_gaps` BIT(1) NOT NULL DEFAULT b'0'
+    COMMENT '1 = do not re-check numbers already known to be absent from the register, for fast close-in-time re-sweeps. 0 = re-check them, because the register does occasionally assign mid-range numbers.',
+  MODIFY COLUMN `delay_jitter` FLOAT NULL DEFAULT 0
+    COMMENT 'Random plus/minus seconds added to delay_sec so the fleet does not fall into lock-step. 0 = fixed delay.',
+  MODIFY COLUMN `updated` TIMESTAMP NOT NULL
+    DEFAULT current_timestamp() ON UPDATE current_timestamp()
+    COMMENT 'Last change to this row, auto-maintained. ALSO the shared campaign epoch used when interval_days = 0: touch this row to make the whole fleet restart that sweep from scratch.';
+
+ALTER TABLE `MD_scrape_control`
+  COMMENT = 'Fleet schedule + work parameters. ONE ROW PER SCHEDULE: each row carries its own match criteria (go_flag, agent_pattern, dow_pattern, run_from/run_until) and its own work params. An agent picks the winning row for itself right now by ORDER BY priority ASC, control_uno DESC LIMIT 1; no match = idle.';
+
+-- CHECK AFTERWARDS: `updated` doubles as the interval_days=0
+-- campaign epoch, and an ALTER rebuilds the table. ON UPDATE
+-- CURRENT_TIMESTAMP does not fire on a rebuild, so the value
+-- should survive - but confirm before trusting a running campaign:
+--   SELECT control_uno, updated FROM MD_scrape_control;   -- before
+--   ... run the ALTERs ...
+--   SELECT control_uno, updated FROM MD_scrape_control;   -- after
+-- If a value did move, every agent would silently re-sweep its
+-- range from scratch. Safest is to apply this while the fleet is
+-- stopped (all go_flag = 0).
+
 -- central fleet commands: push code updates and self-destruct to
 -- machines by host pattern (agents fall back to disabled if this
 -- table is absent)
