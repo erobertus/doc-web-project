@@ -93,6 +93,33 @@ ALTER TABLE MD_scrape_control
   ADD COLUMN skip_gaps BIT NOT NULL DEFAULT b'0'
       AFTER auto_update_hrs;
 
+-- flexible scheduling: turn the control table into a MULTI-ROW
+-- schedule table. Each row is a self-contained schedule (its
+-- criteria + its own work params). go_flag = per-schedule enable.
+-- Defaults keep the existing single row behaving exactly as before
+-- (a schedule matching all agents, all days, in its window).
+ALTER TABLE MD_scrape_control
+  ADD COLUMN agent_pattern VARCHAR(128) NOT NULL DEFAULT '.*',
+  ADD COLUMN dow_pattern   VARCHAR(64)  NOT NULL DEFAULT '.*',
+  ADD COLUMN priority      INT          NOT NULL DEFAULT 100;
+--
+-- ORDER OF OPERATIONS MATTERS. Old agents pick the NEWEST row
+-- (control_uno DESC) and ignore the pattern columns, so adding
+-- schedule rows while old agents are still live makes them follow
+-- the wrong row. So:
+--   1) upgrade the WHOLE fleet first (push the update command,
+--      confirm every host's version in MD_scrape_agents), THEN
+--   2) add schedule rows.
+-- During the upgrade only the original all-matching row exists,
+-- which old and new agents handle identically.
+--
+-- Agents on the new code select the winning schedule for their
+-- host now: enabled, host RLIKE agent_pattern, DATE_FORMAT(NOW(),
+-- '%a') RLIKE dow_pattern, current time inside run_from/run_until
+-- (run_from = run_until means 24h), ORDER BY priority ASC (lower
+-- wins), control_uno DESC as tiebreak. No match = idle. Judged by
+-- the DATABASE clock.
+
 -- central fleet commands: push code updates and self-destruct to
 -- machines by host pattern (agents fall back to disabled if this
 -- table is absent)
@@ -298,8 +325,38 @@ the evening and let the window take over.
 -- START the fleet (within the daily window)
 UPDATE MD_scrape_control SET go_flag = 1;
 
--- STOP the fleet (acts within abort_check doctors per agent)
+-- STOP the fleet (acts within abort_check doctors per agent).
+-- With multiple schedule rows this disables ALL of them:
 UPDATE MD_scrape_control SET go_flag = 0;
+
+-- ===== flexible schedules (multi-row) =====
+-- Before adding rows: make sure only intended rows are enabled -
+-- every go_flag=1 row is an active schedule now:
+UPDATE MD_scrape_control SET go_flag = 0
+WHERE control_uno <> <the row you keep>;
+
+-- weekday nights 19:00-06:00, all agents (edit your kept row)
+UPDATE MD_scrape_control
+SET dow_pattern='Mon|Tue|Wed|Thu|Fri', run_from='19:00:00',
+    run_until='06:00:00', priority=100
+WHERE control_uno = <kept>;
+
+-- weekends 24h, all agents (run_from=run_until => 24h)
+INSERT INTO MD_scrape_control
+  (go_flag, dow_pattern, run_from, run_until, cpso_start, cpso_stop,
+   batch_size, delay_sec, interval_days, priority)
+VALUES (1, 'Sat|Sun', '00:00:00', '00:00:00',
+        10000, 200000, 100, 1.0, 20, 100);
+
+-- the KNST machines run 24h always, and WIN conflicts (priority 10)
+INSERT INTO MD_scrape_control
+  (go_flag, agent_pattern, priority, cpso_start, cpso_stop)
+VALUES (1, '^KNST-', 10, 10000, 200000);
+
+-- which schedule would each active row serve, by rank
+SELECT control_uno, priority, agent_pattern, dow_pattern,
+       run_from, run_until, go_flag+0 AS enabled
+FROM MD_scrape_control ORDER BY priority ASC, control_uno DESC;
 
 -- switch nightly refresh <-> full detail sweep
 UPDATE MD_scrape_control SET quick_mode = 1;   -- or 0

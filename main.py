@@ -1422,7 +1422,108 @@ def run_sweep(conn: 'connection', http_session,
     return processed
 
 
-def read_control(conn: 'connection'):
+def _ctl_from_wide_row(row):
+    """Parse a full (widest-schema) control/schedule row - the
+    column order used by the schedule query - into the ctl dict."""
+    ctl = {'go': bool(row[1]),
+           'quick': bool(row[2]),
+           'cpso_start': row[3] if row[3] is not None else 10000,
+           'cpso_stop': row[4] if row[4] is not None else 200000,
+           'batch_size': row[5] if row[5] is not None else 50,
+           'delay': float(row[6]) if row[6] is not None
+                    else DEFAULT_DELAY,
+           'random': bool(row[7]),
+           'updated': row[8],
+           'abort_check': row[9],
+           'run_from': row[10],
+           'run_until': row[11],
+           'interval': row[12],
+           'log_verbose': bool(row[13]) if row[13] is not None
+                          else None,
+           'auto_update_hrs': row[14],
+           'skip_gaps': bool(row[15]),
+           'delay_jitter': row[16],
+           'now': row[17]}
+    ctl['in_window'] = in_time_window(ctl['now'], ctl['run_from'],
+                                      ctl['run_until'])
+    return ctl
+
+
+# column list for the schedule query, matching _ctl_from_wide_row
+_WIDE_COLS = ('control_uno, go_flag+0, quick_mode+0, cpso_start, '
+              'cpso_stop, batch_size, delay_sec, use_random+0, '
+              'updated, abort_check, run_from, run_until, '
+              'interval_days, log_verbose+0, auto_update_hrs, '
+              'skip_gaps+0, delay_jitter, CURTIME()')
+
+
+def _read_schedule(conn: 'connection', host: str):
+    """Select the winning schedule row for this host RIGHT NOW:
+    enabled (go_flag), agent + day-of-week patterns match, and the
+    current time is inside the row's window - highest priority
+    (lowest number) wins, newest row breaks ties. All judged by
+    the DATABASE clock. Returns the ctl dict, None when no schedule
+    applies (agent idles), or the sentinel 'legacy' when the
+    scheduling columns are absent (caller falls back)."""
+    curs = conn.cursor()
+    where = (
+        "go_flag "
+        "AND ? RLIKE agent_pattern "
+        "AND DATE_FORMAT(NOW(), '%a') RLIKE dow_pattern "
+        "AND (run_from = run_until "                     # 24h
+        "OR (run_from < run_until "
+        "AND CURTIME() >= run_from AND CURTIME() < run_until) "
+        "OR (run_from > run_until "                      # overnight
+        "AND (CURTIME() >= run_from OR CURTIME() < run_until)))")
+    try:
+        curs.execute(
+            f'SELECT {_WIDE_COLS} FROM {CONTROL_TBL} '
+            f'WHERE {where} '
+            f'ORDER BY priority ASC, control_uno DESC LIMIT 1',
+            (host,))
+        row = curs.fetchone()
+    except mariadb.Error:
+        return 'legacy'          # scheduling columns not present
+    finally:
+        conn.commit()
+    return None if row is None else _ctl_from_wide_row(row)
+
+
+def get_auto_update_hrs(conn: 'connection') -> int:
+    """Fleet-global periodic-update cadence, read independently of
+    any schedule so idle agents still auto-update. Any enabled row
+    that sets it turns it on. 0 = off / column absent."""
+    curs = conn.cursor()
+    try:
+        curs.execute(f'SELECT MAX(auto_update_hrs) '
+                     f'FROM {CONTROL_TBL} WHERE go_flag')
+        row = curs.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except mariadb.Error:
+        return 0
+    finally:
+        conn.commit()
+
+
+def read_control(conn: 'connection', host=None):
+    """Decide whether THIS agent should run now and with what
+    params. Returns the winning schedule's ctl dict, or None when
+    the agent should be idle. When host is given and the schedule
+    columns exist, the winning schedule is chosen by priority;
+    otherwise it falls back to the legacy 'newest row + go_flag +
+    window' behaviour (fully backward compatible)."""
+    if host is not None:
+        sched = _read_schedule(conn, host)
+        if sched != 'legacy':
+            return sched          # ctl dict, or None (idle)
+
+    ctl = _read_control_legacy(conn)
+    if ctl is None or not ctl['go'] or not ctl['in_window']:
+        return None
+    return ctl
+
+
+def _read_control_legacy(conn: 'connection'):
     """Read the newest row of the central control table. Returns
     a dict or None when the table is empty. The BIT columns are
     cast to integers server-side so the connector returns plain
@@ -1750,36 +1851,31 @@ def run_agent(args, conn: 'connection'):
             elif action == 'update':
                 do_update('update command')
 
-            ctl = read_control(conn)
-
-            # periodic self-update (auto_update_hrs > 0)
-            hrs = None
-            if ctl is not None:
-                hrs = ctl.get('auto_update_hrs')
-            if hrs is None:
-                hrs = DEFAULT_AUTO_UPDATE_HRS
+            # periodic self-update, read fleet-globally so it fires
+            # even when this agent is idle (no matching schedule)
+            hrs = get_auto_update_hrs(conn)
             if hrs and (time.time() - last_auto_update
                         >= hrs * 3600):
                 last_auto_update = time.time()
                 do_update(f'periodic update ({hrs}h)')
 
+            # the winning schedule for THIS host right now, or None
+            # (idle: no active schedule matches / go off / outside
+            # the window). read_control folds go_flag + agent + day
+            # + time-window into that decision.
+            ctl = read_control(conn, DB_LOG.host)
+
             if ctl is None:
-                print(f'Agent: {CONTROL_TBL} is empty; waiting '
-                      f'for a control row...')
-            elif not ctl['go']:
                 completed_marker = None
                 completed_time = 0.0
-                waiting_logged = False
-            elif not ctl['in_window']:
                 if not waiting_logged:
-                    print(f"Agent: go is set but outside the "
-                          f"run window "
-                          f"({ctl['run_from']} - "
-                          f"{ctl['run_until']}, db time "
-                          f"{ctl['now']}); waiting...")
+                    print('Agent: idle - no active schedule '
+                          'matches this host right now.')
                     waiting_logged = True
+                hb_state = 'idle'
             else:
                 waiting_logged = False
+                hb_state = 'sweeping'
                 resweep_due = (time.time() - completed_time
                                >= AGENT_RESWEEP_SECS)
                 if ctl['updated'] != completed_marker \
@@ -1799,11 +1895,11 @@ def run_agent(args, conn: 'connection'):
                     def keep_running():
                         # also refreshes liveness during long
                         # sweeps (called between batches and at
-                        # the abort-check cadence)
+                        # the abort-check cadence); stops the sweep
+                        # if the schedule stops matching mid-run
                         DB_LOG.heartbeat('sweeping')
-                        c = read_control(conn)
-                        return (c is not None and c['go']
-                                and c['in_window']
+                        return (read_control(conn, DB_LOG.host)
+                                is not None
                                 and not agent_log_oversized())
 
                     n = run_sweep(
@@ -1829,37 +1925,26 @@ def run_agent(args, conn: 'connection'):
                             if ctl['delay_jitter'] is not None
                             else args.delay_jitter))
 
-                    after = read_control(conn)
-                    if after is not None and after['go'] \
-                            and after['in_window']:
-                        # pool exhausted while still 'go' inside
-                        # the window: note the control stamp so we
-                        # do not spin; re-sweep when the row
-                        # changes or after the idle period
+                    after = read_control(conn, DB_LOG.host)
+                    if after is not None:
+                        # pool exhausted while the schedule still
+                        # applies: note the stamp so we do not
+                        # spin; re-sweep on change or after the
+                        # idle period
                         completed_marker = after['updated']
                         completed_time = time.time()
                         print(f'Agent: pool exhausted '
                               f'({n} processed). Idle until the '
-                              f'control row changes or '
+                              f'schedule changes or '
                               f'{AGENT_RESWEEP_SECS // 3600} h '
                               f'passes.')
                     else:
-                        # stopped by flag drop or window close:
-                        # forget the marker so the sweep resumes
-                        # as soon as go/window allows
+                        # stopped by schedule/window ending:
+                        # forget the marker so it resumes when a
+                        # schedule applies again
                         completed_marker = None
                         completed_time = 0.0
 
-            # liveness heartbeat: one upserted row per host so the
-            # fleet's live machines can be listed even while idle
-            if ctl is None:
-                hb_state = 'no-control'
-            elif not ctl['go']:
-                hb_state = 'idle'
-            elif not ctl['in_window']:
-                hb_state = 'waiting-window'
-            else:
-                hb_state = 'sweeping'
             DB_LOG.heartbeat(hb_state)
 
             # hand control back to run_agent.bat so it can rotate
