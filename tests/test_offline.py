@@ -1284,6 +1284,148 @@ class TestMisc(unittest.TestCase):
         self.assertIsInstance(main.get_agent_version(), str)
 
 
+# ==============================================================
+#  9. scheduled-task self-repair
+# ==============================================================
+
+class _Res:
+    def __init__(self, returncode=0, stdout='', stderr=''):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+@contextlib.contextmanager
+def fake_run(result=None, raises=None):
+    """Stand in for subprocess.run inside ensure_task_settings."""
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append((cmd, kw))
+        if raises is not None:
+            raise raises
+        return result if result is not None else _Res()
+
+    old = main.subprocess.run
+    main.subprocess.run = run
+    try:
+        yield calls
+    finally:
+        main.subprocess.run = old
+
+
+class TestTaskSelfRepair(unittest.TestCase):
+    """This runs as SYSTEM on every fleet machine and touches the
+    mechanism keeping the agent alive, so its failure modes matter
+    more than its happy path."""
+
+    def test_reports_what_changed(self):
+        msg = 'task settings repaired: ExecutionTimeLimit PT72H->PT0S'
+        with fake_run(_Res(0, msg + '\n')):
+            self.assertEqual(main.ensure_task_settings(), msg)
+
+    def test_silent_when_already_correct(self):
+        with fake_run(_Res(0, '')):
+            self.assertEqual(main.ensure_task_settings(), '')
+
+    def test_invokes_the_repair_script(self):
+        with fake_run(_Res(0, '')) as calls:
+            main.ensure_task_settings()
+        self.assertEqual(len(calls), 1)
+        cmd = calls[0][0]
+        self.assertEqual(cmd[0], 'powershell')
+        self.assertIn('-Repair', cmd)
+        self.assertIn('agent_task.ps1', ' '.join(cmd))
+        # never -Register: recreating the task would kill the very
+        # agent doing the repair
+        self.assertNotIn('-Register', cmd)
+        # must not block the agent forever, and no console window
+        self.assertIn('timeout', calls[0][1])
+
+    def test_nonzero_exit_is_a_warning_not_a_crash(self):
+        with fake_run(_Res(1, 'ERROR Access is denied.')):
+            got = main.ensure_task_settings()
+        self.assertTrue(got.startswith('WARN'))
+        self.assertIn('Access is denied', got)
+
+    def test_subprocess_failure_never_raises(self):
+        for boom in (OSError('powershell missing'),
+                     main.subprocess.SubprocessError('boom'),
+                     main.subprocess.TimeoutExpired('powershell', 120)):
+            with self.subTest(err=type(boom).__name__):
+                with fake_run(raises=boom):
+                    got = main.ensure_task_settings()
+                self.assertTrue(got.startswith('WARN'))
+
+    def test_skipped_off_windows(self):
+        old = main.os.name
+        main.os.name = 'posix'
+        try:
+            with fake_run(_Res(0, 'should not be called')) as calls:
+                self.assertEqual(main.ensure_task_settings(), '')
+            self.assertEqual(calls, [])
+        finally:
+            main.os.name = old
+
+    def test_missing_script_is_a_no_op(self):
+        old = main.REPO_DIR
+        main.REPO_DIR = os.path.join(HERE, 'no-such-dir')
+        try:
+            with fake_run(_Res(0, 'x')) as calls:
+                self.assertEqual(main.ensure_task_settings(), '')
+            self.assertEqual(calls, [])
+        finally:
+            main.REPO_DIR = old
+
+    def test_output_is_bounded(self):
+        with fake_run(_Res(0, 'x' * 5000)):
+            self.assertLessEqual(len(main.ensure_task_settings()), 400)
+        with fake_run(_Res(1, 'y' * 5000)):
+            self.assertLessEqual(len(main.ensure_task_settings()), 400)
+
+    def test_repair_script_is_shipped(self):
+        # main.py invokes it by path; it must be in the repo
+        self.assertTrue(os.path.exists(
+            os.path.join(ROOT, 'agent_task.ps1')))
+
+    def _start_agent(self, repair):
+        """Enter run_agent far enough to pass the startup block,
+        then bail out of the first poll."""
+        args = types.SimpleNamespace(poll_interval=5, db_host='db')
+        old = (main.ensure_task_settings, main.make_session,
+               main.process_commands)
+        main.ensure_task_settings = repair
+        main.make_session = lambda *a, **kw: None
+        main.process_commands = lambda *a, **kw: (_ for _ in ())\
+            .throw(SystemExit(0))
+        try:
+            with quiet() as out:
+                with self.assertRaises(SystemExit):
+                    main.run_agent(args, FakeDb(REFS))
+            return out.getvalue()
+        finally:
+            (main.ensure_task_settings, main.make_session,
+             main.process_commands) = old
+
+    def test_agent_startup_repairs_the_task(self):
+        # the whole feature is inert if this call goes missing
+        called = []
+        printed = self._start_agent(
+            lambda: called.append(1) and '' or 'task settings repaired: x')
+        self.assertEqual(len(called), 1, 'startup did not repair')
+        self.assertIn('task settings repaired', printed)
+
+    def test_agent_starts_when_repair_reports_nothing(self):
+        printed = self._start_agent(lambda: '')
+        self.assertNotIn('task settings', printed)
+
+    def test_repair_failure_does_not_stop_the_agent(self):
+        # a WARN must be surfaced but must not prevent scraping -
+        # reaching process_commands (SystemExit) proves it went on
+        printed = self._start_agent(lambda: 'WARN denied')
+        self.assertIn('WARN denied', printed)
+
+
 def _main():
     global BLESS
     ap = argparse.ArgumentParser(add_help=False)

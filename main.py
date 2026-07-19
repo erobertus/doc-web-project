@@ -1780,6 +1780,42 @@ def process_commands(conn: 'connection', host: str):
     return action
 
 
+def ensure_task_settings() -> str:
+    """Repair this machine's scheduled task so Task Scheduler cannot
+    silently kill the agent.
+
+    schtasks /create applies Task Scheduler's defaults, and the
+    default execution time limit is 72 hours: the task is ENDED
+    mid-run (a console CTRL+C to the whole tree, leaving a bare ^C
+    at the end of agent.log), and with only an at-boot trigger
+    nothing ever restarts it. agent_task.ps1 clears the limit and
+    adds a repeating trigger as a liveness net.
+
+    Best-effort by design: returns what changed, '' when nothing
+    needed doing, and NEVER raises. A problem repairing the task
+    must not stop the agent from scraping - this runs as SYSTEM on
+    every fleet machine, so its blast radius is the whole fleet."""
+    if os.name != 'nt':
+        return ''
+    script = os.path.join(REPO_DIR, 'agent_task.ps1')
+    if not os.path.exists(script):
+        return ''
+    try:
+        res = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive',
+             '-ExecutionPolicy', 'Bypass', '-File', script,
+             '-Repair'],
+            capture_output=True, text=True, timeout=120,
+            creationflags=_NO_WINDOW)
+    except (OSError, subprocess.SubprocessError) as e:
+        return f'WARN could not check task settings: {e}'
+    out = (res.stdout or '').strip()
+    err = (res.stderr or '').strip()
+    if res.returncode != 0:
+        return f'WARN task settings check failed: {out or err}'[:400]
+    return out[:400]
+
+
 def agent_log_oversized() -> bool:
     """True when run_agent.bat's redirected log (path in
     CPSO_AGENT_LOG) has grown past CPSO_LOG_MAX_MB. Windows will
@@ -1827,6 +1863,17 @@ def run_agent(args, conn: 'connection'):
                f'agent started (version {DB_LOG.version}, '
                f'poll {args.poll_interval}s, knock {knock_desc}, '
                f'log cap {log_cap}MB x{log_keep})')
+
+    # self-heal the scheduled task (see ensure_task_settings). Logged
+    # centrally and only when something actually changed, so the
+    # whole fleet can be confirmed from one query instead of 20
+    # machines:  SELECT host, message FROM MD_scrape_log
+    #            WHERE message LIKE 'task settings%';
+    task_fix = ensure_task_settings()
+    if task_fix:
+        print(task_fix)
+        DB_LOG.log('WARN' if task_fix.startswith('WARN') else 'INFO',
+                   task_fix)
 
     def do_update(reason):
         """git pull; restart (exit 43) only if code changed."""

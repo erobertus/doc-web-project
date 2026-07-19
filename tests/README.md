@@ -10,6 +10,8 @@ machine in a few seconds.
 python tests/test_offline.py            # run everything
 python tests/test_offline.py -v TestScheduling      # one class
 python tests/test_offline.py --bless    # re-record the snapshot
+
+powershell -NoProfile -ExecutionPolicy Bypass -File tests\test_task.ps1
 ```
 
 Needs only `bs4` + `requests` (from `requirements.txt`). The
@@ -28,6 +30,13 @@ bare dev machine can still run the suite.
 | `TestProcessRecordQuick` | The two cases quick mode must escalate to a full scrape |
 | `TestUpdateRecord` | Full-replace write order, child-row keys, autocommit restore |
 | `TestScheduling` | Schedule → `ctl` dict, idle, legacy fallback, fleet-global auto-update, `in_time_window` |
+| `TestTaskSelfRepair` | `ensure_task_settings()`: invokes `-Repair` (never `-Register`), survives every subprocess failure, bounded output, and that `run_agent` actually calls it |
+
+`tests/test_task.ps1` covers `agent_task.ps1`'s decision logic. It
+runs **unelevated and touches nothing** — it dot-sources the script
+with `-LoadOnly` and drives `Repair-Settings` / `Test-HasRepeat`
+with real objects from `New-ScheduledTaskSettingsSet`, the same
+types `Get-ScheduledTask` returns.
 
 ### Deliberately NOT covered
 
@@ -38,6 +47,12 @@ side (row → `ctl`, parameter passing) and assert the SQL *shape*.
 Whether the predicate actually selects the right row on a given
 weekday still needs a live database; the "who ranks where" query in
 `ROLLOUT.md` is the way to eyeball that.
+
+Likewise `Get-ScheduledTask` / `Set-ScheduledTask` /
+`Register-ScheduledTask` against the live task store need admin, so
+`agent_task.ps1`'s decision logic is tested but its writes are not.
+**Verify `-Repair` on one machine before pushing it to the fleet** —
+it runs as SYSTEM and edits the mechanism keeping the agent alive.
 
 Also untested offline: batch allocation / `GET_LOCK` concurrency,
 geocoding, git self-update, and the `.bat` deploy scripts.

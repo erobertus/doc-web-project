@@ -575,3 +575,72 @@ Notes:
 | `--abort` waits forever | Dead clients' batches are reaped automatically once they pass `--stale-minutes` (30 min default); use `--force-abort` to clean immediately |
 | Crashed client stranded its numbers | Self-healing: the next client to request a batch reaps open batches with no completions for 30+ min and releases their numbers — no manual action needed |
 | Repeated `fetch failed (HTTP 403/429)` in logs | Cloudflare pushback: raise `delay_sec`, or narrow the window |
+| **Agent silently stopped, machine still up, `agent.log` ends in a bare `^C`** | Task Scheduler killed the task on its default 72-hour execution time limit — see below |
+
+### Agents dying after ~3 days (fixed July 2026)
+
+Symptom: an agent stops mid-sweep, `agent.log` ends with a bare
+`^C` and **no** `Agent exited with code ... Restarting` line, the
+machine is up and reachable, and it never comes back until someone
+reboots it. Over a week or so most of the fleet goes quiet, one
+machine at a time.
+
+Cause: agents were registered with `schtasks /create`, which
+applies Task Scheduler's defaults — and the default
+`ExecutionTimeLimit` is **72 hours** (`PT72H`). At the limit Task
+Scheduler *ends* the task, delivering a console CTRL+C to the whole
+tree, so `run_agent.bat` dies too and its restart loop never gets
+to run. With only an at-boot trigger, nothing restarts it. Rebooting
+appeared to "fix" it because that re-fires the boot trigger and
+resets the 72-hour clock.
+
+Confirm on any machine:
+
+```powershell
+schtasks /query /tn "CPSO scrape agent" /xml      # look for <ExecutionTimeLimit>
+Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational -MaxEvents 40 |
+  Where-Object Id -in 111,102,201,322 | Select-Object TimeCreated,Id,Message | Format-List
+```
+
+Event ID **111** is Task Scheduler terminating a task on its time
+limit. (If the log is empty, enable "All Tasks History" first.)
+
+**Fix** — `agent_task.ps1` sets `ExecutionTimeLimit=PT0S` (no
+limit), adds a 10-minute repeating trigger as a liveness net
+(`MultipleInstances=IgnoreNew`, so it is a no-op while the agent is
+alive), and clears the battery rules that kill agents on laptops.
+`deploy_agent.bat` now registers the task through it, and a running
+agent repairs its own task at startup, so the fix travels with the
+ordinary `update` command.
+
+Recovery for a fleet already in this state:
+
+```sql
+-- 1. who is actually alive?
+SELECT host, version, state, last_seen FROM MD_scrape_agents
+ORDER BY last_seen DESC;
+```
+
+```powershell
+# 2. restart the dead ones (no reboot, no re-deploy needed - they
+#    come back on old code and then update themselves)
+schtasks /run /s <MACHINE> /tn "CPSO scrape agent"
+```
+
+```sql
+-- 3. push the new code to everyone
+INSERT INTO MD_scrape_command (host_pattern, command, note)
+VALUES ('%', 'update', 'task self-repair');
+
+-- 4. confirm every machine repaired itself (logged once, on the
+--    first start after the update)
+SELECT host, log_time, message FROM MD_scrape_log
+WHERE message LIKE 'task settings%' ORDER BY log_time DESC;
+
+-- 5. confirm versions match before adding schedule rows
+SELECT host, version, last_seen FROM MD_scrape_agents
+ORDER BY version, host;
+```
+
+A machine only needs `bootstrap_agent.bat` re-run if its clone is
+damaged or the task is missing entirely.

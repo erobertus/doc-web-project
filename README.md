@@ -17,6 +17,7 @@ addresses the database does not know yet.
 | `cpso_site.py` | HTTP fetching + HTML parsing of the **new** register (no DB dependencies) |
 | `constants.py` | Table/column names, reference-table maps, final SQL |
 | `GeoCoding.py` | Google geocode lookup/caching (`MD_geo_pos`), standalone re-link utility |
+| `agent_task.ps1` | Scheduled-task definition for fleet agents — registers it correctly and repairs an existing one (no execution time limit, repeating liveness trigger) |
 | `tests/` | Offline regression harness — replays saved register pages, no network or DB needed (`python tests/test_offline.py`; see [tests/README.md](tests/README.md)) |
 
 ## The new CPSO site (2026 rewrite)

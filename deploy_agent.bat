@@ -164,10 +164,17 @@ if not defined AGENT_NAME (
     echo [ ok ] agent name: %AGENT_NAME%
 )
 
-rem --- 5. scheduled task (SYSTEM, at boot, start now) ---------
+rem --- 5. scheduled task (SYSTEM, at boot + repeating) --------
+rem Registered from agent_task.ps1, NOT schtasks /create: the CLI
+rem gives no way to clear the execution time limit, and Task
+rem Scheduler's default is 72 hours - it ends the task mid-run and
+rem an at-boot-only trigger never brings it back. That quietly
+rem killed most of the fleet in July 2026. The PowerShell path sets
+rem no time limit and adds a repeating liveness trigger.
 schtasks /end /tn "CPSO scrape agent" >nul 2>&1
-schtasks /create /f /tn "CPSO scrape agent" /sc onstart ^
-    /tr "%~dp0run_agent.bat" /ru SYSTEM >nul
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass ^
+    -File "%~dp0agent_task.ps1" -Register ^
+    -Command "%~dp0run_agent.bat"
 if errorlevel 1 (
     echo [FAIL] could not create the scheduled task.
     exit /b 1
