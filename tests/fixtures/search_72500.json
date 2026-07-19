@@ -1,0 +1,24 @@
+{
+ "totalcount": 1,
+ "results": [
+  {
+   "name": "Su, Charles   Han",
+   "cpsonumber": "72500",
+   "specialties": "Family Medicine (Emergency Medicine) | Family Medicine ",
+   "primaryaddressnotinpractice": false,
+   "street1": "Winchester District Memorial",
+   "city": "Winchester",
+   "province": "Ontario",
+   "postalcode": "K0C 2K0     ",
+   "street2": "Hospital",
+   "street3": "566 Louise Street",
+   "street4": "",
+   "additionaladdresscount": 0,
+   "phonenumber": "(613) 774-2420",
+   "fax": "",
+   "registrationstatus": "Active",
+   "mostrecentformername": "",
+   "registrationstatuslabel": "active"
+  }
+ ]
+}

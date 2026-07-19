@@ -1,0 +1,399 @@
+{
+ "detail_10310_not_on_register.html.gz": null,
+ "detail_110500_active_fax.html.gz": {
+  "cpso_no": "110500",
+  "date_of_death": "",
+  "expiry_date": "",
+  "former_name": "",
+  "gender": "Woman",
+  "grad_year": "2014",
+  "hospitals": [
+   {
+    "location": "Oshawa",
+    "name": "Lakeridge Health"
+   }
+  ],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": {
+     "city": "Oshawa",
+     "country": "Canada",
+     "lines": [
+      "460 King Street West"
+     ],
+     "postal": "L1J 2K9",
+     "prov": "ON",
+     "raw": "460 King Street West\nOshawa Ontario L1J 2K9"
+    },
+    "ext": "",
+    "fax": "9058001478",
+    "phone": "9058000630"
+   }
+  ],
+  "medical_school": "Memorial University of Newfoundland Faculty of Medicine",
+  "name": "Kanagasabai, Vaishnavi Vernie",
+  "reg_class": "Independent Practice",
+  "reg_class_date": "23 Jan 2025",
+  "specialties": [
+   {
+    "certifying_body": "Royal College of Physicians and Surgeons of Canada",
+    "issued_date": "03 Oct 2019",
+    "name": "Gastroenterology"
+   },
+   {
+    "certifying_body": "Royal College of Physicians and Surgeons of Canada",
+    "issued_date": "30 Jun 2018",
+    "name": "Internal Medicine"
+   }
+  ],
+  "status": "Active",
+  "status_date": "23 Jan 2025"
+ },
+ "detail_119500_expired_nonascii.html.gz": {
+  "cpso_no": "119500",
+  "date_of_death": "",
+  "expiry_date": "09 Aug 2022",
+  "former_name": "",
+  "gender": "Woman",
+  "grad_year": "2015",
+  "hospitals": [],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": null,
+    "ext": "",
+    "fax": "",
+    "phone": ""
+   }
+  ],
+  "medical_school": "Université de Montréal Faculté de Médecine",
+  "name": "Lacaille-Ranger, Ariane",
+  "reg_class": "Independent Practice",
+  "reg_class_date": "17 Jun 2021",
+  "specialties": [
+   {
+    "certifying_body": "Royal College of Physicians and Surgeons of Canada",
+    "issued_date": "28 Apr 2021",
+    "name": "General Surgery"
+   }
+  ],
+  "status": "Expired: Failure to Renew Membership",
+  "status_date": "09 Aug 2022"
+ },
+ "detail_55000_expired_resigned.html.gz": {
+  "cpso_no": "55000",
+  "date_of_death": "",
+  "expiry_date": "01 Mar 2024",
+  "former_name": "",
+  "gender": "Man",
+  "grad_year": "1965",
+  "hospitals": [],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH",
+   "BENGALI",
+   "HINDI",
+   "URDU"
+  ],
+  "locations": [
+   {
+    "address": null,
+    "ext": "",
+    "fax": "",
+    "phone": ""
+   }
+  ],
+  "medical_school": "Dacca Medical College",
+  "name": "Ahmed, Abul Barkat Mohiuddin",
+  "reg_class": "Independent Practice",
+  "reg_class_date": "16 Nov 1994",
+  "specialties": [
+   {
+    "certifying_body": "Royal College of Physicians and Surgeons of Canada",
+    "issued_date": "23 Nov 1981",
+    "name": "Psychiatry"
+   }
+  ],
+  "status": "Expired: Resigned from membership",
+  "status_date": "04 Mar 2024"
+ },
+ "detail_72500_active_3_hospitals.html.gz": {
+  "cpso_no": "72500",
+  "date_of_death": "",
+  "expiry_date": "",
+  "former_name": "",
+  "gender": "Man",
+  "grad_year": "1998",
+  "hospitals": [
+   {
+    "location": "Barry's Bay",
+    "name": "St Francis Memorial Hospital"
+   },
+   {
+    "location": "Kenora",
+    "name": "Lake of the Woods District Hospital"
+   },
+   {
+    "location": "Winchester",
+    "name": "Winchester District Memorial Hospital"
+   }
+  ],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": {
+     "city": "Winchester",
+     "country": "Canada",
+     "lines": [
+      "Winchester District Memorial",
+      "Hospital",
+      "566 Louise Street"
+     ],
+     "postal": "K0C 2K0",
+     "prov": "ON",
+     "raw": "Winchester District Memorial\nHospital\n566 Louise Street\nWinchester Ontario K0C 2K0"
+    },
+    "ext": "",
+    "fax": "",
+    "phone": "(613) 774-2420"
+   }
+  ],
+  "medical_school": "Schulich School of Medicine and Dentistry, Western University",
+  "name": "Su, Charles Han",
+  "reg_class": "Independent Practice",
+  "reg_class_date": "21 Jun 2000",
+  "specialties": [
+   {
+    "certifying_body": "College of Family Physicians of Canada",
+    "issued_date": "17 Dec 2004",
+    "name": "Family Medicine (Emergency Medicine)"
+   },
+   {
+    "certifying_body": "College of Family Physicians of Canada",
+    "issued_date": "14 Jun 2000",
+    "name": "Family Medicine"
+   }
+  ],
+  "status": "Active",
+  "status_date": "01 Jul 1998"
+ },
+ "detail_79082_deceased_former.html.gz": {
+  "cpso_no": "79082",
+  "date_of_death": "",
+  "expiry_date": "01 Dec 2016",
+  "former_name": "Fric, Elana Christine (Used Until: 26 Aug 2008)",
+  "gender": "Woman",
+  "grad_year": "2003",
+  "hospitals": [],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": null,
+    "ext": "",
+    "fax": "",
+    "phone": ""
+   }
+  ],
+  "medical_school": "University of Ottawa",
+  "name": "Fric-Shamji, Elana Christine",
+  "reg_class": "Independent Practice",
+  "reg_class_date": "04 Sep 2008",
+  "specialties": [
+   {
+    "certifying_body": "College of Family Physicians of Canada",
+    "issued_date": "11 Jan 2006",
+    "name": "Family Medicine"
+   }
+  ],
+  "status": "Deceased",
+  "status_date": "01 Dec 2016"
+ },
+ "detail_83500_active_2_locations.html.gz": {
+  "cpso_no": "83500",
+  "date_of_death": "",
+  "expiry_date": "",
+  "former_name": "",
+  "gender": "Man",
+  "grad_year": "1999",
+  "hospitals": [],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH",
+   "HINDI",
+   "PANJABI/PUNJABI"
+  ],
+  "locations": [
+   {
+    "address": {
+     "city": "Oakville",
+     "country": "Canada",
+     "lines": [
+      "Canadian Road"
+     ],
+     "postal": "L6J 5C9",
+     "prov": "ON",
+     "raw": "Canadian Road\nOakville Ontario L6J 5C9"
+    },
+    "ext": "",
+    "fax": "",
+    "phone": "(905) 845-2511"
+   },
+   {
+    "address": {
+     "city": "Mississauga",
+     "country": "Canada",
+     "lines": [
+      "1310 Fewster Drive"
+     ],
+     "postal": "L4W 1A4",
+     "prov": "ON",
+     "raw": "1310 Fewster Drive\nMississauga Ontario L4W 1A4"
+    },
+    "ext": "",
+    "fax": "",
+    "phone": "9052821808"
+   }
+  ],
+  "medical_school": "University of The West Indies,Trinidad",
+  "name": "Rai, Gurinder Singh",
+  "reg_class": "Independent Practice",
+  "reg_class_date": "12 Jul 2005",
+  "specialties": [
+   {
+    "certifying_body": "College of Family Physicians of Canada",
+    "issued_date": "09 Dec 2004",
+    "name": "Family Medicine"
+   }
+  ],
+  "status": "Active",
+  "status_date": "12 Jul 2005"
+ },
+ "detail_88000_expired_terms.html.gz": {
+  "cpso_no": "88000",
+  "date_of_death": "",
+  "expiry_date": "20 Apr 2008",
+  "former_name": "",
+  "gender": "Woman",
+  "grad_year": "2001",
+  "hospitals": [],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": null,
+    "ext": "",
+    "fax": "",
+    "phone": ""
+   }
+  ],
+  "medical_school": "Memorial University of Newfoundland Faculty of Medicine",
+  "name": "Cooper, Stephanie Lynn",
+  "reg_class": "Postgraduate Education (Elective)",
+  "reg_class_date": "07 Jan 2008",
+  "specialties": [],
+  "status": "Expired: Terms and Conditions",
+  "status_date": "20 Apr 2008"
+ },
+ "detail_91500_active_jurisdiction.html.gz": {
+  "cpso_no": "91500",
+  "date_of_death": "",
+  "expiry_date": "",
+  "former_name": "",
+  "gender": "Woman",
+  "grad_year": "2000",
+  "hospitals": [
+   {
+    "location": "Hamilton",
+    "name": "Hamilton Health Sciences Centre McMaster Children's Hospital"
+   }
+  ],
+  "jurisdictions": [
+   "Australia"
+  ],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": {
+     "city": "Hamilton",
+     "country": "Canada",
+     "lines": [
+      "McMaster Children's Hospital",
+      "Division of Emergency Medicine",
+      "Department of Paediatrics",
+      "1280 Main St W, HSC 2N49I"
+     ],
+     "postal": "L8S 4K1",
+     "prov": "ON",
+     "raw": "McMaster Children's Hospital\nDivision of Emergency Medicine\nDepartment of Paediatrics\n1280 Main St W, HSC 2N49I\nHamilton Ontario L8S 4K1"
+    },
+    "ext": "",
+    "fax": "",
+    "phone": "(905) 521-2100"
+   }
+  ],
+  "medical_school": "The University of Western Australia Faculty of Health and Medical Sciences",
+  "name": "Wyatt, Emma Louise",
+  "reg_class": "Provisional",
+  "reg_class_date": "01 Jan 2026",
+  "specialties": [
+   {
+    "certifying_body": "College of Physicians and Surgeons of Ontario",
+    "issued_date": "19 Apr 2018",
+    "name": "Pediatric Emergency Medicine"
+   }
+  ],
+  "status": "Active",
+  "status_date": "01 Jul 2010"
+ },
+ "detail_94138_deceased.html.gz": {
+  "cpso_no": "94138",
+  "date_of_death": "",
+  "expiry_date": "26 Aug 2017",
+  "former_name": "",
+  "gender": "Man",
+  "grad_year": "2001",
+  "hospitals": [],
+  "jurisdictions": [],
+  "languages": [
+   "ENGLISH"
+  ],
+  "locations": [
+   {
+    "address": null,
+    "ext": "",
+    "fax": "",
+    "phone": ""
+   }
+  ],
+  "medical_school": "University of Mysore",
+  "name": "Sreeharsha, Boraiah",
+  "reg_class": "Restricted",
+  "reg_class_date": "05 Jul 2010",
+  "specialties": [
+   {
+    "certifying_body": "Royal College of Physicians and Surgeons of Canada",
+    "issued_date": "04 Jun 2012",
+    "name": "Diagnostic Radiology"
+   }
+  ],
+  "status": "Deceased",
+  "status_date": "26 Aug 2017"
+ }
+}
