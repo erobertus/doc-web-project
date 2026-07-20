@@ -186,12 +186,45 @@ ALTER TABLE `MD_scrape_control`
 -- machines by host pattern (agents fall back to disabled if this
 -- table is absent)
 CREATE TABLE IF NOT EXISTS MD_scrape_command (
-  cmd_uno      INT AUTO_INCREMENT PRIMARY KEY,
-  host_pattern VARCHAR(128) NOT NULL,   -- SQL LIKE: 'Clinic-%','%',exact
-  command      VARCHAR(16)  NOT NULL,   -- 'update' or 'destruct'
-  created      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  cmd_uno      INT AUTO_INCREMENT PRIMARY KEY
+    COMMENT 'PK, and the position agents track. Each machine records the highest cmd_uno it has acted on in a local agent_cmd.pos file, so a command runs once per machine. A machine with no pos file (fresh deploy, or the repo folder was wiped) starts from 0 and replays everything still listed here.',
+  host_pattern VARCHAR(128) NOT NULL
+    COMMENT 'WHICH AGENTS this command targets. SQL LIKE with % and _ - NOT a regex. (agent_pattern in MD_scrape_control is RLIKE; this table predates it. Do not copy patterns between them.) Matched against the agent name: CPSO_AGENT_NAME when set, else the machine name. % = the whole fleet.',
+  command      VARCHAR(16)  NOT NULL
+    COMMENT 'update = git pull and restart if the code changed. Idempotent, so it is safe to replay and carries no age guard. destruct = uninstall the agent from the matching machines. Any other value is ignored.',
+  created      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    COMMENT 'When the command was queued. A destruct is obeyed ONLY within 180 minutes (DESTRUCT_TTL_MIN) of this, so a freshly deployed machine replaying the backlog cannot uninstall itself on a months-old destruct row. update has no such guard because replaying it is harmless.',
   note         VARCHAR(255) NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    COMMENT 'Free text for whoever queued the command. Never read by the agent - it exists so the table explains itself months later.'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+  COMMENT='Central fleet commands, targeted by host pattern. Agents check this BEFORE the schedule, so a command reaches an idle or out-of-window agent too. Rows are never deleted by agents; each machine only remembers its own position in agent_cmd.pos.';
+
+-- Already have MD_scrape_command (the CREATE above is IF NOT
+-- EXISTS, so it will NOT add the comments to an existing table)?
+-- Retrofit them. Comments only - the definitions restate what is
+-- already there.
+--
+-- CHECK FIRST: `created` is written below as it is stored when
+-- explicit_defaults_for_timestamp is OFF (the MariaDB default).
+-- If yours is ON the column is nullable instead, and the line
+-- below would change that. Confirm with:
+--     SHOW CREATE TABLE MD_scrape_command;
+-- and drop the NOT NULL from that one line if it does not match.
+ALTER TABLE `MD_scrape_command`
+  MODIFY COLUMN `cmd_uno` INT(11) NOT NULL AUTO_INCREMENT
+    COMMENT 'PK, and the position agents track. Each machine records the highest cmd_uno it has acted on in a local agent_cmd.pos file, so a command runs once per machine. A machine with no pos file (fresh deploy, or the repo folder was wiped) starts from 0 and replays everything still listed here.',
+  MODIFY COLUMN `host_pattern` VARCHAR(128) NOT NULL
+    COMMENT 'WHICH AGENTS this command targets. SQL LIKE with % and _ - NOT a regex. (agent_pattern in MD_scrape_control is RLIKE; this table predates it. Do not copy patterns between them.) Matched against the agent name: CPSO_AGENT_NAME when set, else the machine name. % = the whole fleet.',
+  MODIFY COLUMN `command` VARCHAR(16) NOT NULL
+    COMMENT 'update = git pull and restart if the code changed. Idempotent, so it is safe to replay and carries no age guard. destruct = uninstall the agent from the matching machines. Any other value is ignored.',
+  MODIFY COLUMN `created` TIMESTAMP NOT NULL
+    DEFAULT current_timestamp()
+    COMMENT 'When the command was queued. A destruct is obeyed ONLY within 180 minutes (DESTRUCT_TTL_MIN) of this, so a freshly deployed machine replaying the backlog cannot uninstall itself on a months-old destruct row. update has no such guard because replaying it is harmless.',
+  MODIFY COLUMN `note` VARCHAR(255) NULL DEFAULT NULL
+    COMMENT 'Free text for whoever queued the command. Never read by the agent - it exists so the table explains itself months later.';
+
+ALTER TABLE `MD_scrape_command`
+  COMMENT = 'Central fleet commands, targeted by host pattern. Agents check this BEFORE the schedule, so a command reaches an idle or out-of-window agent too. Rows are never deleted by agents; each machine only remembers its own position in agent_cmd.pos.';
 
 -- clear any leftover abort flag / stale open batches
 DELETE FROM MD_batch_header
