@@ -1251,6 +1251,196 @@ class TestScheduling(unittest.TestCase):
 
 
 # ==============================================================
+#  7b. batch allocation: candidates are built on the server
+# ==============================================================
+
+class FakeAllocDb:
+    """Just enough of MariaDB for request_workload: no abort flag,
+    no stale batches, the lock granted, and the pool SELECT answers
+    with `free` (the server's job - the fake only checks the SQL)."""
+
+    BATCH_ID = 777
+
+    def __init__(self, free=()):
+        self.free = [(n,) for n in free]
+        self.statements = []
+        self.autocommit = True
+
+    def cursor(self):
+        return FakeCursor(self)
+
+    def commit(self):
+        pass
+
+    def dispatch(self, stmt, params, cur):
+        s = ' '.join(stmt.split())
+        if s.startswith('INSERT INTO ' + K.BATCH_HEAD_TBL):
+            cur.lastrowid = self.BATCH_ID
+        if 'GET_LOCK' in s or 'RELEASE_LOCK' in s:
+            return [(1,)]
+        if s.startswith('SELECT COUNT(*)'):
+            return [(0,)]                 # no abort requested
+        if s.startswith('SELECT') and ' LIMIT ' in s:
+            return list(self.free)        # the pool query
+        return []
+
+    def pool_selects(self):
+        return [s for s, _ in self.statements
+                if s.startswith('SELECT') and 'LIMIT' in s]
+
+    def claims(self):
+        return [s for s, _ in self.statements
+                if s.startswith('INSERT INTO ' + K.BATCH_DET_TBL)]
+
+
+class TestBatchAllocation(unittest.TestCase):
+
+    def alloc(self, free=(10005, 10007), **kw):
+        args = dict(batch_size=100, random=False, interval=7,
+                    min_val=10000, max_val=250000)
+        args.update(kw)
+        db = FakeAllocDb(free)
+        with quiet():
+            got = main.request_workload(db, **args)
+        return db, got
+
+    def test_no_candidate_list_is_sent_from_the_client(self):
+        # the Oct 2026 Xenon bloat: a 240,000-row INSERT ... VALUES
+        # per request. Every statement must now be small.
+        for random in (False, True):
+            db, _ = self.alloc(random=random)
+            for s, _ in db.statements:
+                with self.subTest(random=random, stmt=s[:60]):
+                    self.assertLess(len(s), 4096)
+                    self.assertNotIn('TEMPORARY', s.upper())
+                    self.assertNotIn('_TMP_', s)
+
+    def test_sequential_reads_sequence_matching_python_range(self):
+        # range(10000, 250000) stops at 249999; seq_ bounds are
+        # inclusive, so the table must end at max_val - 1
+        db, _ = self.alloc()
+        (pool,) = db.pool_selects()
+        self.assertIn('FROM seq_10000_to_249999 c', pool)
+        self.assertIn('ORDER BY c.seq LIMIT 100', pool)
+
+    def test_descending(self):
+        db, _ = self.alloc(desc=True)
+        (pool,) = db.pool_selects()
+        self.assertIn('ORDER BY c.seq DESC LIMIT 100', pool)
+
+    def test_random_reads_known_doctors_inclusive_range(self):
+        db, _ = self.alloc(random=True)
+        (pool,) = db.pool_selects()
+        self.assertIn(f'FROM {K.MD_DIR_TABLE} c WHERE c.CPSO_no '
+                      f'BETWEEN 10000 AND 250000', pool)
+        self.assertIn('ORDER BY RAND() LIMIT 100', pool)
+        self.assertNotIn('seq_', pool)
+
+    def test_excludes_numbers_held_by_open_batches(self):
+        db, _ = self.alloc(interval=0)       # whatever the interval
+        (pool,) = db.pool_selects()
+        self.assertIn('WHERE d.CPSO_no = c.seq', pool)
+        self.assertIn('NOT d.isCompleted AND h.end_date IS NULL',
+                      pool)
+
+    def test_freshness_rules_unchanged(self):
+        cases = [
+            (dict(interval=7),
+             '(d.isCompleted AND (d.updated_date_time > '
+             '(NOW() - INTERVAL 7 DAY)))'),
+            (dict(interval=0, sweep_start='2026-10-01 00:00:00'),
+             "(d.isCompleted AND (d.updated_date_time >= "
+             "'2026-10-01 00:00:00'))"),
+            (dict(interval=0),
+             '(d.isCompleted AND (0))'),
+            (dict(interval=7, skip_gaps=True),
+             '((d.isCompleted AND (d.updated_date_time > '
+             '(NOW() - INTERVAL 7 DAY))) OR d.PermExcluded)'),
+        ]
+        for kw, cond in cases:
+            with self.subTest(**kw):
+                db, _ = self.alloc(**kw)
+                (pool,) = db.pool_selects()
+                self.assertIn(f'AND {cond})', pool)
+
+    def test_claims_exactly_what_the_pool_returned(self):
+        db, got = self.alloc(free=(10005, 10007))
+        self.assertEqual(got, (FakeAllocDb.BATCH_ID, (10005, 10007)))
+        (claim,) = db.claims()
+        self.assertIn('VALUES (777, 10005, NOW()),'
+                      '(777, 10007, NOW())', claim)
+
+    def test_claim_happens_under_the_lock(self):
+        db, _ = self.alloc()
+        order = [s for s, _ in db.statements]
+        lock = next(i for i, s in enumerate(order)
+                    if 'GET_LOCK' in s)
+        pool = order.index(db.pool_selects()[0])
+        claim = order.index(db.claims()[0])
+        commit = order.index('COMMIT')
+        release = next(i for i, s in enumerate(order)
+                       if 'RELEASE_LOCK' in s)
+        self.assertLess(lock, pool)
+        self.assertLess(pool, claim)
+        self.assertLess(claim, commit)
+        self.assertLess(commit, release)
+
+    def test_empty_range_claims_nothing(self):
+        db, got = self.alloc(min_val=20000, max_val=20000)
+        self.assertEqual(got, (FakeAllocDb.BATCH_ID, ()))
+        self.assertEqual(db.pool_selects(), [])
+        self.assertEqual(db.claims(), [])
+
+    def test_nothing_free_claims_nothing(self):
+        db, got = self.alloc(free=())
+        self.assertEqual(got, (FakeAllocDb.BATCH_ID, ()))
+        self.assertEqual(db.claims(), [])
+
+
+class _FailingConn:
+    """A logger connection whose every statement fails."""
+
+    def __init__(self):
+        self.closed = False
+
+    def cursor(self):
+        return self
+
+    def execute(self, *a):
+        raise db_error('server has gone away', errno=2006)
+
+    def close(self):
+        self.closed = True
+
+
+class TestDbLoggerClosesFailedConnection(unittest.TestCase):
+    """A failed logger connection is closed before it is dropped,
+    so the server does not hold the old session open."""
+
+    def logger(self):
+        lg = main.DbLogger()
+        lg.enabled = True
+        lg.params = {}
+        lg._connect = lambda silent=True: False    # stay offline
+        lg.conn = _FailingConn()
+        return lg
+
+    def test_log(self):
+        lg = self.logger()
+        conn = lg.conn
+        lg.log('INFO', 'hello')
+        self.assertTrue(conn.closed)
+        self.assertIsNone(lg.conn)
+
+    def test_heartbeat(self):
+        lg = self.logger()
+        conn = lg.conn
+        lg.heartbeat('idle')
+        self.assertTrue(conn.closed)
+        self.assertIsNone(lg.conn)
+
+
+# ==============================================================
 #  8. odds and ends
 # ==============================================================
 

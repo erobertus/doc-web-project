@@ -30,6 +30,8 @@ bare dev machine can still run the suite.
 | `TestProcessRecordQuick` | The two cases quick mode must escalate to a full scrape |
 | `TestUpdateRecord` | Full-replace write order, child-row keys, autocommit restore |
 | `TestScheduling` | Schedule → `ctl` dict, idle, legacy fallback, fleet-global auto-update, `in_time_window` |
+| `TestBatchAllocation` | The pool is built on the server (`seq_` table / `z847e_MD_dir`), never sent from the client; range bounds, ordering, freshness rules, open-batch exclusion, claim under the lock |
+| `TestDbLoggerClosesFailedConnection` | A failed logger connection is closed before it is dropped |
 | `TestTaskSelfRepair` | `ensure_task_settings()`: invokes `-Repair` (never `-Register`), survives every subprocess failure, bounded output, and that `run_agent` actually calls it |
 
 `tests/test_task.ps1` covers `agent_task.ps1`'s decision logic. It
@@ -54,8 +56,14 @@ Likewise `Get-ScheduledTask` / `Set-ScheduledTask` /
 **Verify `-Repair` on one machine before pushing it to the fleet** —
 it runs as SYSTEM and edits the mechanism keeping the agent alive.
 
-Also untested offline: batch allocation / `GET_LOCK` concurrency,
-geocoding, git self-update, and the `.bat` deploy scripts.
+Batch allocation is checked for its SQL *shape* only: which numbers
+the pool query actually returns is decided by MariaDB.
+`tests/xenon_alloc_check.sql` compares, read-only on the live
+database, the pool the old temp-table code computed with the new
+one, and measures the new query's per-connection memory peak.
+
+Also untested offline: `GET_LOCK` concurrency, geocoding, git
+self-update, and the `.bat` deploy scripts.
 
 ## The golden snapshot
 

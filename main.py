@@ -209,7 +209,7 @@ class DbLogger:
             if getattr(e, 'errno', None) == 1146:
                 self._agents_tbl = False      # table not set up
             else:
-                self.conn = None              # reconnect next time
+                self._drop_conn()             # reconnect next time
 
     def debug(self, message, cpso_no=None, batch_uno=None):
         """Per-doctor detail rows; written only in verbose mode
@@ -251,6 +251,15 @@ class DbLogger:
             self.conn = None
             return False
 
+    def _drop_conn(self):
+        """Forget a failed connection, closing it first so the
+        server does not keep the session until wait_timeout."""
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = None
+
     def log(self, level, message, cpso_no=None, batch_uno=None):
         if not self.enabled:
             return
@@ -285,7 +294,7 @@ class DbLogger:
                     self._version_col = False
                     attempt -= 1
                     continue
-                self.conn = None      # reconnect once, then stop
+                self._drop_conn()     # reconnect once, then stop
                 if attempt >= 2:
                     self.enabled = False
                     print(f'Central log disabled ({e}); '
@@ -674,44 +683,30 @@ def _allocate_batch(conn, curs, batch_size, random, interval,
     curs.execute(stmt)
     batch_id = curs.lastrowid
 
-    # make list
-    if not random:
-
-        # GET LIST OF CPSO NUMBERS
-        # create simple range first
-        src_list = [x for x in range(min_val, max_val)]
-    else:
-        # random mode refreshes doctors we already know about,
-        # in shuffled order (the ORDER BY happens on the final
-        # select below - the temp table would lose any insertion
-        # order to its primary key anyway)
-        stmt = 'SELECT d.CPSO_no ' \
-               f'FROM {MD_DIR_TABLE} d ' \
-               f'WHERE d.CPSO_no between {min_val} and {max_val}'
-
-        curs.execute(stmt)
-
-        src_list = [cpso_no for (cpso_no,) in curs]
-
-    stmt = f'CREATE TEMPORARY TABLE _TMP_{batch_id} (' \
-           f'cpso_no INT(11),' \
-           f'PRIMARY KEY (cpso_no))'
-
-    curs.execute(stmt)
-
-    if len(src_list) > 0:
-        stmt = f'INSERT INTO _TMP_{batch_id} VALUES (' \
-               + '), ('.join(map(str,src_list)) \
-               + ')'
-
-        curs.execute(stmt)
-
+    # The candidate numbers come from the server itself, never from
+    # the client. Shipping the whole range back as one INSERT ...
+    # VALUES (240,000 rows, ~2.3 MB of SQL) cost mariadbd ~51 MiB
+    # per request just to parse, and glibc kept that memory per
+    # thread - over a GiB across the fleet on Xenon (Oct 2026).
+    min_val, max_val = int(min_val), int(max_val)
     if random:
+        # random mode refreshes doctors we already know about, in
+        # shuffled order
+        src_col = f'c.{C_CPSO_NO}'
+        src = f'{MD_DIR_TABLE} c ' \
+              f'WHERE {src_col} BETWEEN {min_val} AND {max_val}'
         order_clause = 'ORDER BY RAND()'
-    elif desc:
-        order_clause = 'ORDER BY cpso_no DESC'
     else:
-        order_clause = 'ORDER BY cpso_no'
+        # sequential mode walks every number in the range: MariaDB's
+        # built-in SEQUENCE engine generates seq_<from>_to_<to> on
+        # the fly (nothing stored, nothing to create). Its bounds
+        # are inclusive, so it stops at max_val - 1, exactly like
+        # the range(min_val, max_val) it replaces.
+        src_col = 'c.seq'
+        src = f'seq_{min_val}_to_{max_val - 1} c WHERE 1' \
+            if max_val > min_val else None     # empty range
+        order_clause = f'ORDER BY {src_col}' + \
+                       (' DESC' if desc else '')
 
     # A number is skipped when it was COMPLETED "recently":
     #  - interval >= 1: within the freshness window (the normal
@@ -724,15 +719,15 @@ def _allocate_batch(conn, curs, batch_size, random, interval,
     # range numbers get picked up); skip_gaps also excludes
     # PermExcluded gaps for a fast re-sweep.
     if interval >= 1:
-        done_recent = 'updated_date_time > ' \
+        done_recent = 'd.updated_date_time > ' \
                       f'(NOW() - INTERVAL {interval} DAY)'
     elif sweep_start is not None:
-        done_recent = f"updated_date_time >= '{sweep_start}'"
+        done_recent = f"d.updated_date_time >= '{sweep_start}'"
     else:
         done_recent = '0'          # no marker: exclude none
-    done_cond = f'(isCompleted AND ({done_recent}))'
+    done_cond = f'(d.isCompleted AND ({done_recent}))'
     if skip_gaps:
-        done_cond = f'({done_cond} OR PermExcluded)'
+        done_cond = f'({done_cond} OR d.PermExcluded)'
 
     # Also skip numbers that are CLAIMED but not yet completed by
     # a still-open batch (another live worker holds them). This is
@@ -740,27 +735,32 @@ def _allocate_batch(conn, curs, batch_size, random, interval,
     # workers from scraping the same number, so it holds even with
     # a zero/short freshness window. Reaped (abandoned) batches
     # have end_date set, so their numbers are free again.
-    stmt = f'SELECT cpso_no FROM _TMP_{batch_id} ' \
-           f'WHERE cpso_no NOT IN (' \
-           f'  SELECT d.{C_CPSO_NO} FROM {BATCH_DET_TBL} d ' \
-           f'  JOIN {BATCH_HEAD_TBL} h ' \
-           f'  ON d.batch_uno = h.batch_uno ' \
-           f'  WHERE d.{C_CPSO_NO} between {min_val} and {max_val} '\
-           f'  AND NOT d.isCompleted AND h.end_date IS NULL) ' \
-           f'AND cpso_no NOT IN (' \
-           f'  SELECT DISTINCT {C_CPSO_NO} FROM {BATCH_DET_TBL} ' \
-           f'  WHERE {C_CPSO_NO} between {min_val} and {max_val} ' \
-           f'  AND {done_cond}) ' \
-           f'{order_clause} ' \
-           f'LIMIT {batch_size}'
+    # A plain SELECT, then a separate INSERT of the few claimed
+    # rows: an INSERT ... SELECT would take shared locks on every
+    # batch-detail row the NOT EXISTS checks read (REPEATABLE READ)
+    # and stall siblings marking their numbers completed.
+    src_list = []
+    if src is not None:
+        stmt = f'SELECT {src_col} FROM {src} ' \
+               f'AND NOT EXISTS (' \
+               f'  SELECT 1 FROM {BATCH_DET_TBL} d ' \
+               f'  WHERE d.{C_CPSO_NO} = {src_col} ' \
+               f'  AND d.{C_CPSO_NO} ' \
+               f'      BETWEEN {min_val} AND {max_val} ' \
+               f'  AND {done_cond}) ' \
+               f'AND NOT EXISTS (' \
+               f'  SELECT 1 FROM {BATCH_DET_TBL} d ' \
+               f'  JOIN {BATCH_HEAD_TBL} h ' \
+               f'  ON d.batch_uno = h.batch_uno ' \
+               f'  WHERE d.{C_CPSO_NO} = {src_col} ' \
+               f'  AND d.{C_CPSO_NO} ' \
+               f'      BETWEEN {min_val} AND {max_val} ' \
+               f'  AND NOT d.isCompleted AND h.end_date IS NULL) ' \
+               f'{order_clause} ' \
+               f'LIMIT {batch_size}'
 
-    curs.execute(stmt)
-
-#    for (cpso_no,) in curs:
-#        if cpso_no in src_list:
-#            src_list.remove(cpso_no)
-
-    src_list = [cpso_no for (cpso_no,) in curs]
+        curs.execute(stmt)
+        src_list = [cpso_no for (cpso_no,) in curs]
 
     stmt = f'INSERT INTO {BATCH_DET_TBL} (batch_uno, cpso_no, ' \
            f'updated_date_time) VALUES '
@@ -772,10 +772,7 @@ def _allocate_batch(conn, curs, batch_size, random, interval,
         curs.execute(stmt)
     curs.execute(COMMIT_TRAN)
 
-    # Drop temp table (autocommit is restored by the caller)
-    stmt = f'DROP TEMPORARY TABLE _TMP_{batch_id}'
-    curs.execute(stmt)
-
+    # (autocommit is restored by the caller)
     return (batch_id, tuple(src_list))
 
 
