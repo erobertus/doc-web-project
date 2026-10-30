@@ -739,9 +739,16 @@ def _allocate_batch(conn, curs, batch_size, random, interval,
     # rows: an INSERT ... SELECT would take shared locks on every
     # batch-detail row the NOT EXISTS checks read (REPEATABLE READ)
     # and stall siblings marking their numbers completed.
+    # exists_to_in=off keeps both checks as per-number lookups in
+    # the (cpso_no, isCompleted, ...) index. With MariaDB's default
+    # rewrite the open-batch check became a list built by scanning
+    # ALL of MD_batch_details - 11.1M rows, ~5 s per request while
+    # holding the allocation lock (Xenon, Oct 2026); without it the
+    # same numbers come back in ~1.8 s.
     src_list = []
     if src is not None:
-        stmt = f'SELECT {src_col} FROM {src} ' \
+        stmt = "SET STATEMENT optimizer_switch='exists_to_in=off' " \
+               f'FOR SELECT {src_col} FROM {src} ' \
                f'AND NOT EXISTS (' \
                f'  SELECT 1 FROM {BATCH_DET_TBL} d ' \
                f'  WHERE d.{C_CPSO_NO} = {src_col} ' \

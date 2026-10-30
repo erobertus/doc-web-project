@@ -1280,13 +1280,16 @@ class FakeAllocDb:
             return [(1,)]
         if s.startswith('SELECT COUNT(*)'):
             return [(0,)]                 # no abort requested
-        if s.startswith('SELECT') and ' LIMIT ' in s:
-            return list(self.free)        # the pool query
+        if self._is_pool(s):
+            return list(self.free)
         return []
 
+    @staticmethod
+    def _is_pool(s):
+        return 'NOT EXISTS' in s and ' LIMIT ' in s
+
     def pool_selects(self):
-        return [s for s, _ in self.statements
-                if s.startswith('SELECT') and 'LIMIT' in s]
+        return [s for s, _ in self.statements if self._is_pool(s)]
 
     def claims(self):
         return [s for s, _ in self.statements
@@ -1322,6 +1325,18 @@ class TestBatchAllocation(unittest.TestCase):
         (pool,) = db.pool_selects()
         self.assertIn('FROM seq_10000_to_249999 c', pool)
         self.assertIn('ORDER BY c.seq LIMIT 100', pool)
+
+    def test_pool_query_keeps_per_number_lookups(self):
+        # without the hint MariaDB rewrote the open-batch check into
+        # a full scan of MD_batch_details (11.1M rows, ~5 s under
+        # the allocation lock, measured on Xenon)
+        for random in (False, True):
+            db, _ = self.alloc(random=random)
+            (pool,) = db.pool_selects()
+            with self.subTest(random=random):
+                self.assertTrue(pool.startswith(
+                    "SET STATEMENT optimizer_switch='exists_to_in=off'"
+                    " FOR SELECT "))
 
     def test_descending(self):
         db, _ = self.alloc(desc=True)

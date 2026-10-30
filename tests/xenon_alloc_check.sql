@@ -133,8 +133,15 @@ COMMIT;
 -- 3. Memory and plan of the NEW query, in a FRESH connection
 --    (open a new connection / session first, so its peak counter
 --    starts from zero; re-run the SET @... line above in it).
---    Today every sweeping agent connection peaks at 51.4 MiB.
+--    Before the fix every sweeping agent connection peaked at
+--    51.4 MiB. The agent sends this query prefixed with
+--    SET STATEMENT optimizer_switch='exists_to_in=off' FOR ...;
+--    the session setting below does the same for both statements.
+--    (Oct 29 on Xenon: rewrite on = 11.1M rows read, ~5 s;
+--    off = per-number index lookups, ~1.8 s, same numbers.)
 -- ------------------------------------------------------------
+SET SESSION optimizer_switch = 'exists_to_in=off';
+
 SELECT c.seq
 FROM seq_10000_to_249999 c
 WHERE NOT EXISTS (
